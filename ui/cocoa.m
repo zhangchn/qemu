@@ -401,6 +401,10 @@ QemuCocoaView *cocoaView;
         pixman_image_unref(pixman_image);
     }
 
+    if (cursorImage) {
+        CGImageRelease(cursorImage);
+    }
+
     [super dealloc];
 }
 
@@ -1875,11 +1879,11 @@ static void cocoa_cursor_define(DisplayChangeListener *dcl, QEMUCursor *c)
                                    provider, NULL, 0, kCGRenderingIntentDefault);
 
     CGDataProviderRelease(provider);
+    CGFloat width = c->width;
+    CGFloat height = c->height;
     dispatch_async(dispatch_get_main_queue(), ^{
         [cocoaView setCursorImage:img];
         CGRect rect = [cocoaView cursorRect];
-        CGFloat width = c->width / [cocoaView cdx];
-        CGFloat height = c->height / [cocoaView cdy];
         rect.size = CGSizeMake(width, height);
         [cocoaView setCursorRect:rect];
     });
@@ -1894,8 +1898,7 @@ static void cocoa_mouse_set(DisplayChangeListener *dcl,
         CGRect rect = [cocoaView cursorRect];
         // Mark old cursor rect as dirty
         [cocoaView setNeedsDisplayInRect:rect];
-        rect.origin = CGPointMake(x / [cocoaView cdx], 
-                                  screen.height - (y + rect.size.height) / [cocoaView cdy]);
+        rect.origin = CGPointMake(x, screen.height - (y + rect.size.height));
         [cocoaView setCursorRect:rect];
         [cocoaView setCursorVisible:visible ? YES : NO];
         // Mark new cursor rect as dirty
