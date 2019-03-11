@@ -488,10 +488,10 @@ QemuCocoaView *cocoaView;
                                                         );
             CGContextDrawImage (viewContextRef, cgrect(rectList[i]), clipImageRef);
             CGImageRelease (clipImageRef);
-            if (cursorVisible && cursorImage && NSIntersectsRect(clipRect, cursorRect)) {
-                //CGRect interRect = NSIntersectionRect(rectList[i], cursorRect);
-                CGContextDrawImage (viewContextRef, cgrect(rectList[i]), cursorImage);
-            }
+
+        }
+        if (cursorVisible && cursorImage && NSIntersectsRect(rect, cursorRect)) {
+            CGContextDrawImage (viewContextRef, cursorRect, cursorImage);
         }
         CGImageRelease (imageRef);
     }
@@ -1867,28 +1867,40 @@ static void cocoa_cursor_define(DisplayChangeListener *dcl, QEMUCursor *c)
                                    bitsPerComponent, bitsPerPixel, c->width * bitsPerComponent / 2,
 #ifdef __LITTLE_ENDIAN__
                                    CGColorSpaceCreateWithName(kCGColorSpaceGenericRGB), //colorspace for OS X >= 10.4
-                                   kCGBitmapByteOrder32Little | kCGImageAlphaNoneSkipFirst,
+                                   kCGBitmapByteOrder32Little | kCGImageAlphaFirst,
 #else
                                    CGColorSpaceCreateDeviceRGB(), //colorspace for OS X < 10.4 (actually ppc)
-                                   kCGImageAlphaNoneSkipFirst, //bitmapInfo
+                                   kCGImageAlphaFirst, //bitmapInfo
 #endif
                                    provider, NULL, 0, kCGRenderingIntentDefault);
 
-    [cocoaView setCursorImage:img];
-    CGRect rect = [cocoaView cursorRect];
-    rect.size = CGSizeMake(c->width, c->height);
-    [cocoaView setCursorRect:rect];
     CGDataProviderRelease(provider);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [cocoaView setCursorImage:img];
+        CGRect rect = [cocoaView cursorRect];
+        CGFloat width = c->width / [cocoaView cdx];
+        CGFloat height = c->height / [cocoaView cdy];
+        rect.size = CGSizeMake(width, height);
+        [cocoaView setCursorRect:rect];
+    });
     [pool release];
 }
 static void cocoa_mouse_set(DisplayChangeListener *dcl,
                             int x, int y, int visible)
 {
     NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
-    CGRect rect = [cocoaView cursorRect];
-    rect.origin = CGPointMake(x, y);
-    [cocoaView setCursorRect:rect];
-    [cocoaView setCursorVisible:visible ? YES : NO];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        QEMUScreen screen = [cocoaView gscreen];
+        CGRect rect = [cocoaView cursorRect];
+        // Mark old cursor rect as dirty
+        [cocoaView setNeedsDisplayInRect:rect];
+        rect.origin = CGPointMake(x / [cocoaView cdx], 
+                                  screen.height - (y + rect.size.height) / [cocoaView cdy]);
+        [cocoaView setCursorRect:rect];
+        [cocoaView setCursorVisible:visible ? YES : NO];
+        // Mark new cursor rect as dirty
+        [cocoaView setNeedsDisplayInRect:rect];
+    });
     [pool release];
 }
 
