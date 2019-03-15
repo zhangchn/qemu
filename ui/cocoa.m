@@ -405,6 +405,24 @@ QemuCocoaView *cocoaView;
     return (p.x > -1 && p.x < screen.width && p.y > -1 && p.y < screen.height);
 }
 
+/* Get location of event and convert to virtual screen coordinate */
+- (CGPoint) screenLocationOfEvent:(NSEvent *)ev
+{
+    NSWindow *eventWindow = [ev window];
+    if (!eventWindow) {
+	return [self.window convertPointFromScreen:[ev locationInWindow]];
+    } else if ([self.window isEqual:eventWindow]) {
+        return [ev locationInWindow];
+    } else {
+        return [self.window convertPointFromScreen:[eventWindow convertPointToScreen:[ev locationInWindow]]];
+    }
+}
+
+- (BOOL) screenContainsPointOfEvent:(NSEvent *)ev
+{
+    return [self screenContainsPoint:[self screenLocationOfEvent:ev]];
+}
+
 - (void) hideCursor
 {
     if (!cursor_hide) {
@@ -815,7 +833,9 @@ QemuCocoaView *cocoaView;
             break;
         case NSEventTypeMouseMoved:
             if (isAbsoluteEnabled) {
-                if (![self screenContainsPoint:p] || ![[self window] isKeyWindow]) {
+                BOOL is_key_window = [[self window] isKeyWindow];
+                BOOL is_in_screen =  [self screenContainsPointOfEvent: event];
+                if (!is_in_screen || !is_key_window) {
                     if (isMouseGrabbed) {
                         [self ungrabMouse];
                     }
@@ -927,9 +947,10 @@ QemuCocoaView *cocoaView;
                  * The check on screenContainsPoint is to avoid sending out of range values for
                  * clicks in the titlebar.
                  */
-                if ([self screenContainsPoint:p]) {
-                    qemu_input_queue_abs(dcl->con, INPUT_AXIS_X, p.x, 0, screen.width);
-                    qemu_input_queue_abs(dcl->con, INPUT_AXIS_Y, screen.height - p.y, 0, screen.height);
+                if ([self screenContainsPointOfEvent:event]) {
+                    CGPoint loc = [self screenLocationOfEvent: event];
+                    qemu_input_queue_abs(dcl->con, INPUT_AXIS_X, loc.x, 0, screen.width);
+                    qemu_input_queue_abs(dcl->con, INPUT_AXIS_Y, screen.height - loc.y, 0, screen.height);
                 }
             } else {
                 qemu_input_queue_rel(dcl->con, INPUT_AXIS_X, (int)[event deltaX]);
