@@ -627,6 +627,30 @@ int qcow2_validate_table(BlockDriverState *bs, uint64_t offset,
     return 0;
 }
 
+static const char *const mutable_opts[] = {
+    QCOW2_OPT_LAZY_REFCOUNTS,
+    QCOW2_OPT_DISCARD_REQUEST,
+    QCOW2_OPT_DISCARD_SNAPSHOT,
+    QCOW2_OPT_DISCARD_OTHER,
+    QCOW2_OPT_OVERLAP,
+    QCOW2_OPT_OVERLAP_TEMPLATE,
+    QCOW2_OPT_OVERLAP_MAIN_HEADER,
+    QCOW2_OPT_OVERLAP_ACTIVE_L1,
+    QCOW2_OPT_OVERLAP_ACTIVE_L2,
+    QCOW2_OPT_OVERLAP_REFCOUNT_TABLE,
+    QCOW2_OPT_OVERLAP_REFCOUNT_BLOCK,
+    QCOW2_OPT_OVERLAP_SNAPSHOT_TABLE,
+    QCOW2_OPT_OVERLAP_INACTIVE_L1,
+    QCOW2_OPT_OVERLAP_INACTIVE_L2,
+    QCOW2_OPT_OVERLAP_BITMAP_DIRECTORY,
+    QCOW2_OPT_CACHE_SIZE,
+    QCOW2_OPT_L2_CACHE_SIZE,
+    QCOW2_OPT_L2_CACHE_ENTRY_SIZE,
+    QCOW2_OPT_REFCOUNT_CACHE_SIZE,
+    QCOW2_OPT_CACHE_CLEAN_INTERVAL,
+    NULL
+};
+
 static QemuOptsList qcow2_runtime_opts = {
     .name = "qcow2",
     .head = QTAILQ_HEAD_INITIALIZER(qcow2_runtime_opts.head),
@@ -3646,9 +3670,7 @@ static int coroutine_fn qcow2_co_truncate(BlockDriverState *bs, int64_t offset,
     }
 
     /* cannot proceed if image has bitmaps */
-    if (s->nb_bitmaps) {
-        /* TODO: resize bitmaps in the image */
-        error_setg(errp, "Can't resize an image which has bitmaps");
+    if (qcow2_truncate_bitmaps_check(bs, errp)) {
         ret = -ENOTSUP;
         goto fail;
     }
@@ -5275,6 +5297,7 @@ BlockDriver bdrv_qcow2 = {
 
     .create_opts         = &qcow2_create_opts,
     .strong_runtime_opts = qcow2_strong_runtime_opts,
+    .mutable_opts        = mutable_opts,
     .bdrv_co_check       = qcow2_co_check,
     .bdrv_amend_options  = qcow2_amend_options,
 

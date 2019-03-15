@@ -497,7 +497,7 @@ Makefile: $(version-obj-y)
 # Build libraries
 
 libqemuutil.a: $(util-obj-y) $(trace-obj-y) $(stub-obj-y)
-libvhost-user.a: $(libvhost-user-obj-y)
+libvhost-user.a: $(libvhost-user-obj-y) $(util-obj-y) $(stub-obj-y)
 
 ######################################################################
 
@@ -964,7 +964,8 @@ $(filter %.1 %.7 %.8,$(DOCS)): scripts/texi2pod.pl
 %/coverage-report.html:
 	@mkdir -p $*
 	$(call quiet-command,\
-		gcovr -p --html --html-details -o $@, \
+		gcovr -r $(SRC_PATH) --object-directory $(BUILD_PATH) \
+		-p --html --html-details -o $@, \
 		"GEN", "coverage-report.html")
 
 .PHONY: coverage-report

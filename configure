@@ -456,6 +456,8 @@ glusterfs_xlator_opt="no"
 glusterfs_discard="no"
 glusterfs_fallocate="no"
 glusterfs_zerofill="no"
+glusterfs_ftruncate_has_stat="no"
+glusterfs_iocb_has_stat="no"
 gtk=""
 gtk_gl="no"
 tls_priority="NORMAL"
@@ -1109,8 +1111,6 @@ for opt do
   ;;
   --disable-slirp) slirp="no"
   ;;
-  --enable-slirp=git) slirp="git"
-  ;;
   --enable-slirp=system) slirp="system"
   ;;
   --disable-vde) vde="no"
@@ -1221,6 +1221,10 @@ for opt do
   --disable-curses) curses="no"
   ;;
   --enable-curses) curses="yes"
+  ;;
+  --disable-iconv) iconv="no"
+  ;;
+  --enable-iconv) iconv="yes"
   ;;
   --disable-curl) curl="no"
   ;;
@@ -1711,6 +1715,7 @@ disabled with --disable-FEATURE, default is enabled if available:
   gtk             gtk UI
   vte             vte support for the gtk UI
   curses          curses UI
+  iconv           font glyph conversion support
   vnc             VNC UI support
   vnc-sasl        SASL encryption for VNC server
   vnc-jpeg        JPEG lossy compression for VNC server
@@ -1836,7 +1841,7 @@ fi
 # Consult white-list to determine whether to enable werror
 # by default.  Only enable by default for git builds
 if test -z "$werror" ; then
-    if test -d "$source_path/.git" && \
+    if test -e "$source_path/.git" && \
         { test "$linux" = "yes" || test "$mingw32" = "yes"; }; then
         werror="yes"
     else
@@ -3433,7 +3438,51 @@ EOF
 fi
 
 ##########################################
+# iconv probe
+if test "$iconv" != "no" ; then
+  cat > $TMPC << EOF
+#include <iconv.h>
+int main(void) {
+  iconv_t conv = iconv_open("WCHAR_T", "UCS-2");
+  return conv != (iconv_t) -1;
+}
+EOF
+  iconv_prefix_list="/usr/local:/usr"
+  iconv_lib_list=":-liconv"
+  IFS=:
+  for iconv_prefix in $iconv_prefix_list; do
+    IFS=:
+    iconv_cflags="-I$iconv_prefix/include"
+    iconv_ldflags="-L$iconv_prefix/lib"
+    for iconv_link in $iconv_lib_list; do
+      unset IFS
+      iconv_lib="$iconv_ldflags $iconv_link"
+      echo "looking at iconv in '$iconv_cflags' '$iconv_lib'" >> config.log
+      if compile_prog "$iconv_cflags" "$iconv_lib" ; then
+        iconv_found=yes
+        break
+      fi
+    done
+    if test "$iconv_found" = yes ; then
+      break
+    fi
+  done
+  if test "$iconv_found" = "yes" ; then
+    iconv=yes
+  else
+    if test "$iconv" = "yes" ; then
+      feature_not_found "iconv" "Install iconv devel"
+    fi
+    iconv=no
+  fi
+fi
+
+##########################################
 # curses probe
+if test "$iconv" = "no" ; then
+  # curses will need iconv
+  curses=no
+fi
 if test "$curses" != "no" ; then
   if test "$mingw32" = "yes" ; then
     curses_inc_list="$($pkg_config --cflags ncurses 2>/dev/null):"
@@ -3447,14 +3496,17 @@ if test "$curses" != "no" ; then
 #include <locale.h>
 #include <curses.h>
 #include <wchar.h>
+#include <langinfo.h>
 int main(void) {
+  const char *codeset;
   wchar_t wch = L'w';
   setlocale(LC_ALL, "");
   resize_term(0, 0);
   addwstr(L"wide chars\n");
   addnwstr(&wch, 1);
   add_wch(WACS_DEGREE);
-  return 0;
+  codeset = nl_langinfo(CODESET);
+  return codeset != 0;
 }
 EOF
   IFS=:
@@ -4090,6 +4142,38 @@ if test "$glusterfs" != "no" ; then
     if $pkg_config --atleast-version=6 glusterfs-api; then
       glusterfs_fallocate="yes"
       glusterfs_zerofill="yes"
+    fi
+    cat > $TMPC << EOF
+#include <glusterfs/api/glfs.h>
+
+int
+main(void)
+{
+	/* new glfs_ftruncate() passes two additional args */
+	return glfs_ftruncate(NULL, 0, NULL, NULL);
+}
+EOF
+    if compile_prog "$glusterfs_cflags" "$glusterfs_libs" ; then
+      glusterfs_ftruncate_has_stat="yes"
+    fi
+    cat > $TMPC << EOF
+#include <glusterfs/api/glfs.h>
+
+/* new glfs_io_cbk() passes two additional glfs_stat structs */
+static void
+glusterfs_iocb(glfs_fd_t *fd, ssize_t ret, struct glfs_stat *prestat, struct glfs_stat *poststat, void *data)
+{}
+
+int
+main(void)
+{
+	glfs_io_cbk iocb = &glusterfs_iocb;
+	iocb(NULL, 0 , NULL, NULL, NULL);
+	return 0;
+}
+EOF
+    if compile_prog "$glusterfs_cflags" "$glusterfs_libs" ; then
+      glusterfs_iocb_has_stat="yes"
     fi
   else
     if test "$glusterfs" = "yes" ; then
@@ -5780,8 +5864,6 @@ case "$slirp" in
   "" | yes)
     if $pkg_config slirp; then
       slirp=system
-    elif test -e "${source_path}/.git" && test $git_update = 'yes' ; then
-      slirp=git
     elif test -e "${source_path}/slirp/Makefile" ; then
       slirp=internal
     elif test -z "$slirp" ; then
@@ -5799,10 +5881,7 @@ case "$slirp" in
 esac
 
 case "$slirp" in
-  git | internal)
-    if test "$slirp" = git; then
-      git_submodules="${git_submodules} slirp"
-    fi
+  internal)
     mkdir -p slirp
     slirp_cflags="-I\$(SRC_PATH)/slirp/src -I\$(BUILD_DIR)/slirp/src"
     slirp_libs="-L\$(BUILD_DIR)/slirp -lslirp"
@@ -5901,6 +5980,17 @@ if test "$mingw32" = "yes" ; then
             LDFLAGS="-Wl,$flag $LDFLAGS"
         fi
     done
+fi
+
+# Disable OpenBSD W^X if available
+if test "$tcg" = "yes" && test "$targetos" = "OpenBSD"; then
+    cat > $TMPC <<EOF
+    int main(void) { return 0; }
+EOF
+    wx_ldflags="-Wl,-z,wxneeded"
+    if compile_prog "" "$wx_ldflags"; then
+        QEMU_LDFLAGS="$QEMU_LDFLAGS $wx_ldflags"
+    fi
 fi
 
 qemu_confdir=$sysconfdir$confsuffix
@@ -6206,6 +6296,7 @@ echo "libgcrypt         $gcrypt"
 echo "nettle            $nettle $(echo_version $nettle $nettle_version)"
 echo "libtasn1          $tasn1"
 echo "PAM               $auth_pam"
+echo "iconv support     $iconv"
 echo "curses support    $curses"
 echo "virgl support     $virglrenderer $(echo_version $virglrenderer $virgl_version)"
 echo "curl support      $curl"
@@ -6453,7 +6544,7 @@ if test "$slirp" != "no"; then
   echo "SLIRP_CFLAGS=$slirp_cflags" >> $config_host_mak
   echo "SLIRP_LIBS=$slirp_libs" >> $config_host_mak
 fi
-if [ "$slirp" = "git" -o "$slirp" = "internal" ]; then
+if [ "$slirp" = "internal" ]; then
     echo "config-host.h: subdir-slirp" >> $config_host_mak
 fi
 if test "$vde" = "yes" ; then
@@ -6540,6 +6631,11 @@ if test "$sdl" = "yes" ; then
 fi
 if test "$cocoa" = "yes" ; then
   echo "CONFIG_COCOA=y" >> $config_host_mak
+fi
+if test "$iconv" = "yes" ; then
+  echo "CONFIG_ICONV=y" >> $config_host_mak
+  echo "ICONV_CFLAGS=$iconv_cflags" >> $config_host_mak
+  echo "ICONV_LIBS=$iconv_lib" >> $config_host_mak
 fi
 if test "$curses" = "yes" ; then
   echo "CONFIG_CURSES=m" >> $config_host_mak
@@ -6963,6 +7059,14 @@ fi
 
 if test "$glusterfs_zerofill" = "yes" ; then
   echo "CONFIG_GLUSTERFS_ZEROFILL=y" >> $config_host_mak
+fi
+
+if test "$glusterfs_ftruncate_has_stat" = "yes" ; then
+  echo "CONFIG_GLUSTERFS_FTRUNCATE_HAS_STAT=y" >> $config_host_mak
+fi
+
+if test "$glusterfs_iocb_has_stat" = "yes" ; then
+  echo "CONFIG_GLUSTERFS_IOCB_HAS_STAT=y" >> $config_host_mak
 fi
 
 if test "$libssh2" = "yes" ; then
