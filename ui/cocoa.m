@@ -410,11 +410,31 @@ QemuCocoaView *cocoaView;
 {
     NSWindow *eventWindow = [ev window];
     if (!eventWindow) {
-	return [self.window convertPointFromScreen:[ev locationInWindow]];
-    } else if ([self.window isEqual:eventWindow]) {
-        return [ev locationInWindow];
+        if (!isFullscreen) {
+            return [[self window] convertPointFromScreen:[ev locationInWindow]];
+        } else {
+            CGPoint loc = [self convertPoint:[[self window] convertPointFromScreen:[ev locationInWindow]] fromView:nil];
+            if (!stretch_video) {
+                return loc;
+            }
+            loc.x /= cdx;
+            loc.y /= cdy;
+            return loc;
+        }
+    } else if ([[self window] isEqual:eventWindow]) {
+        if (!isFullscreen) {
+            return [ev locationInWindow];
+        } else {
+            CGPoint loc = [self convertPoint:[ev locationInWindow] fromView:nil];
+            if (!stretch_video) {
+                return loc;
+            }
+            loc.x /= cdx;
+            loc.y /= cdy;
+            return loc;
+        }
     } else {
-        return [self.window convertPointFromScreen:[eventWindow convertPointToScreen:[ev locationInWindow]]];
+        return [[self window] convertPointFromScreen:[eventWindow convertPointToScreen:[ev locationInWindow]]];
     }
 }
 
@@ -722,7 +742,6 @@ QemuCocoaView *cocoaView;
     int keycode = 0;
     bool mouse_event = false;
     static bool switched_to_fullscreen = false;
-    NSPoint p = [event locationInWindow];
 
     switch ([event type]) {
         case NSEventTypeFlagsChanged:
@@ -835,7 +854,7 @@ QemuCocoaView *cocoaView;
             if (isAbsoluteEnabled) {
                 BOOL is_key_window = [[self window] isKeyWindow];
                 BOOL is_in_screen =  [self screenContainsPointOfEvent: event];
-                if (!is_in_screen || !is_key_window) {
+                if (!is_in_screen || !(is_key_window || isFullscreen)) {
                     if (isMouseGrabbed) {
                         [self ungrabMouse];
                     }
@@ -881,7 +900,7 @@ QemuCocoaView *cocoaView;
             break;
         case NSEventTypeLeftMouseUp:
             mouse_event = true;
-            if (!isMouseGrabbed && [self screenContainsPoint:p]) {
+            if (!isMouseGrabbed && [self screenContainsPointOfEvent:event]) {
                 if([[self window] isKeyWindow]) {
                     [self grabMouse];
                 }
@@ -944,7 +963,7 @@ QemuCocoaView *cocoaView;
         if (isMouseGrabbed) {
             if (isAbsoluteEnabled) {
                 /* Note that the origin for Cocoa mouse coords is bottom left, not top left.
-                 * The check on screenContainsPoint is to avoid sending out of range values for
+                 * The check on screenContainsPointOfEvent is to avoid sending out of range values for
                  * clicks in the titlebar.
                  */
                 if ([self screenContainsPointOfEvent:event]) {
