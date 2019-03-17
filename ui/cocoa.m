@@ -532,8 +532,15 @@ QemuCocoaView *cocoaView;
             CGImageRelease (clipImageRef);
 
         }
-        if (cursorVisible && cursorImage && NSIntersectsRect(rect, cursorRect)) {
-            CGContextDrawImage (viewContextRef, cursorRect, cursorImage);
+        CGRect cursorDrawRect = cursorRect;
+        if (isAbsoluteEnabled && stretch_video) {
+            cursorDrawRect.origin.x *= cdx;
+            cursorDrawRect.origin.y *= cdy;
+            cursorDrawRect.size.width *= cdx;
+            cursorDrawRect.size.height *= cdy;
+        }
+        if (cursorVisible && cursorImage && NSIntersectsRect(rect, cursorDrawRect)) {
+            CGContextDrawImage (viewContextRef, cursorDrawRect, cursorImage);
         }
         CGImageRelease (imageRef);
     }
@@ -1935,14 +1942,31 @@ static void cocoa_mouse_set(DisplayChangeListener *dcl,
     NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
     dispatch_async(dispatch_get_main_queue(), ^{
         QEMUScreen screen = [cocoaView gscreen];
-        CGRect rect = [cocoaView cursorRect];
+        float cdx = [cocoaView cdx];
+        float cdy = [cocoaView cdy];
         // Mark old cursor rect as dirty
-        [cocoaView setNeedsDisplayInRect:rect];
+        CGRect rect = [cocoaView cursorRect];
+        CGRect cursorDrawRect = rect;
+        if ([cocoaView isAbsoluteEnabled] && stretch_video) {
+            cursorDrawRect.origin.x *= cdx;
+            cursorDrawRect.origin.y *= cdy;
+            cursorDrawRect.size.width *= cdx;
+            cursorDrawRect.size.height *= cdy;
+        }
+        [cocoaView setNeedsDisplayInRect:cursorDrawRect];
+        // Update rect for cursor sprite
         rect.origin = CGPointMake(x, screen.height - (y + rect.size.height));
         [cocoaView setCursorRect:rect];
         [cocoaView setCursorVisible:visible ? YES : NO];
         // Mark new cursor rect as dirty
-        [cocoaView setNeedsDisplayInRect:rect];
+        cursorDrawRect = rect;
+        if ([cocoaView isAbsoluteEnabled] && stretch_video) {
+            cursorDrawRect.origin.x *= cdx;
+            cursorDrawRect.origin.y *= cdy;
+            cursorDrawRect.size.width *= cdx;
+            cursorDrawRect.size.height *= cdy;
+        }
+        [cocoaView setNeedsDisplayInRect:cursorDrawRect];
     });
     [pool release];
 }
