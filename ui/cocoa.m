@@ -334,6 +334,9 @@ static void handleAnyDeviceErrors(Error * err)
     BOOL isFullscreen;
     BOOL isAbsoluteEnabled;
     BOOL isMouseDeassociated;
+    CGRect cursorRect;
+    CGImageRef cursorImage;
+    BOOL cursorVisible;
 }
 - (void) switchSurface:(pixman_image_t *)image;
 - (void) grabMouse;
@@ -362,6 +365,13 @@ static void handleAnyDeviceErrors(Error * err)
 - (float) cdy;
 - (QEMUScreen) gscreen;
 - (void) raiseAllKeys;
+- (CGRect) cursorRect;
+- (void) setCursorRect:(CGRect)rect;
+- (CGImageRef) cursorImage;
+- (void) setCursorImage:(CGImageRef)image;
+- (BOOL) isCursorVisible;
+- (void) setCursorVisible:(BOOL)visible;
+- (CGRect) convertRectFromQemuScreen:(CGRect)rect;
 @end
 
 QemuCocoaView *cocoaView;
@@ -390,6 +400,10 @@ QemuCocoaView *cocoaView;
     if (dataProviderRef) {
         CGDataProviderRelease(dataProviderRef);
         pixman_image_unref(pixman_image);
+    }
+
+    if (cursorImage) {
+        CGImageRelease(cursorImage);
     }
 
     [super dealloc];
@@ -510,6 +524,12 @@ QemuCocoaView *cocoaView;
                                                         );
             CGContextDrawImage (viewContextRef, cgrect(rectList[i]), clipImageRef);
             CGImageRelease (clipImageRef);
+
+        }
+        CGRect cursorDrawRect = stretch_video ?
+                                    [self convertRectFromQemuScreen:cursorRect] : cursorRect;
+        if (cursorVisible && cursorImage && NSIntersectsRect(rect, cursorDrawRect)) {
+            CGContextDrawImage (viewContextRef, cursorDrawRect, cursorImage);
         }
         CGImageRelease (imageRef);
     }
@@ -897,7 +917,7 @@ QemuCocoaView *cocoaView;
         case NSEventTypeLeftMouseUp:
             mouse_event = true;
             if (!isMouseGrabbed && [self screenContainsPoint:p]) {
-                if([[self window] isKeyWindow]) {
+                if(isFullscreen || [[self window] isKeyWindow]) {
                     [self grabMouse];
                 }
             }
@@ -1022,6 +1042,28 @@ QemuCocoaView *cocoaView;
 - (float) cdy {return cdy;}
 - (QEMUScreen) gscreen {return screen;}
 
+- (CGRect) cursorRect {return cursorRect;}
+- (void) setCursorRect:(CGRect)rect {cursorRect = rect;}
+- (CGImageRef) cursorImage {return cursorImage;}
+- (void) setCursorImage:(CGImageRef)image
+{
+    if (cursorImage && cursorImage != image) {
+        CGImageRelease(cursorImage);
+    }
+    cursorImage = image;
+}
+- (BOOL) isCursorVisible {return cursorVisible;}
+- (void) setCursorVisible:(BOOL)visible {cursorVisible = visible;}
+
+- (CGRect) convertRectFromQemuScreen:(CGRect)rect
+{
+    CGRect viewRect = rect;
+    viewRect.origin.x *= cdx;
+    viewRect.origin.y *= cdy;
+    viewRect.size.width *= cdx;
+    viewRect.size.height *= cdy;
+    return viewRect;
+}
 /*
  * Makes the target think all down keys are being released.
  * This prevents a stuck key problem, since we will not see
@@ -1865,6 +1907,59 @@ static void cocoa_refresh(DisplayChangeListener *dcl)
     [pool release];
 }
 
+static void cocoa_cursor_define(DisplayChangeListener *dcl, QEMUCursor *c)
+{
+    NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
+    int bitsPerComponent = [cocoaView gscreen].bitsPerComponent;
+    int bitsPerPixel = [cocoaView gscreen].bitsPerPixel;
+    CGDataProviderRef provider = CGDataProviderCreateWithData(NULL, c->data, c->width * 4 * c->height, NULL);
+
+    CGImageRef img = CGImageCreate(c->width, c->height,
+                                   bitsPerComponent, bitsPerPixel, c->width * bitsPerComponent / 2,
+#ifdef __LITTLE_ENDIAN__
+                                   CGColorSpaceCreateWithName(kCGColorSpaceGenericRGB), //colorspace for OS X >= 10.4
+                                   kCGBitmapByteOrder32Little | kCGImageAlphaFirst,
+#else
+                                   CGColorSpaceCreateDeviceRGB(), //colorspace for OS X < 10.4 (actually ppc)
+                                   kCGImageAlphaFirst, //bitmapInfo
+#endif
+                                   provider, NULL, 0, kCGRenderingIntentDefault);
+
+    CGDataProviderRelease(provider);
+    CGFloat width = c->width;
+    CGFloat height = c->height;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [cocoaView setCursorImage:img];
+        CGRect rect = [cocoaView cursorRect];
+        rect.size = CGSizeMake(width, height);
+        [cocoaView setCursorRect:rect];
+    });
+    [pool release];
+}
+
+static void cocoa_mouse_set(DisplayChangeListener *dcl,
+                            int x, int y, int visible)
+{
+    NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        QEMUScreen screen = [cocoaView gscreen];
+        // Mark old cursor rect as dirty
+        CGRect rect = [cocoaView cursorRect];
+        CGRect dirtyRect = stretch_video ?
+                        [cocoaView convertRectFromQemuScreen:rect] : rect;
+        [cocoaView setNeedsDisplayInRect:dirtyRect];
+        // Update rect for cursor sprite
+        rect.origin = CGPointMake(x, screen.height - (y + rect.size.height));
+        [cocoaView setCursorRect:rect];
+        [cocoaView setCursorVisible:visible ? YES : NO];
+        // Mark new cursor rect as dirty
+        dirtyRect = stretch_video ?
+                        [cocoaView convertRectFromQemuScreen:rect] : rect;
+        [cocoaView setNeedsDisplayInRect:dirtyRect];
+    });
+    [pool release];
+}
+
 static void cocoa_cleanup(void)
 {
     COCOA_DEBUG("qemu_cocoa: cocoa_cleanup\n");
@@ -1876,6 +1971,8 @@ static const DisplayChangeListenerOps dcl_ops = {
     .dpy_gfx_update = cocoa_update,
     .dpy_gfx_switch = cocoa_switch,
     .dpy_refresh = cocoa_refresh,
+    .dpy_mouse_set = cocoa_mouse_set,
+    .dpy_cursor_define = cocoa_cursor_define,
 };
 
 static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
