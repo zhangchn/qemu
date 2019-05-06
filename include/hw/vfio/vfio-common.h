@@ -159,6 +159,7 @@ typedef struct VFIODisplay {
     struct {
         QTAILQ_HEAD(, VFIODMABuf) bufs;
         VFIODMABuf *primary;
+        VFIODMABuf *overlay;
         VFIODMABuf *cursor;
     } dmabuf;
 } VFIODisplay;

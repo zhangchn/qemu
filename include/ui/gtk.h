@@ -47,6 +47,7 @@ typedef struct VirtualGfxConsole {
     int x, y, w, h;
     egl_fb guest_fb;
     egl_fb win_fb;
+    egl_fb overlay_fb;
     egl_fb cursor_fb;
     int cursor_x;
     int cursor_y;
@@ -116,6 +117,8 @@ void gd_egl_cursor_dmabuf(DisplayChangeListener *dcl,
                           uint32_t hot_x, uint32_t hot_y);
 void gd_egl_cursor_position(DisplayChangeListener *dcl,
                             uint32_t pos_x, uint32_t pos_y);
+void gd_egl_overlay_dmabuf(DisplayChangeListener *dcl,
+			   QemuDmaBuf *dmabuf);
 void gd_egl_release_dmabuf(DisplayChangeListener *dcl,
                            QemuDmaBuf *dmabuf);
 void gd_egl_scanout_flush(DisplayChangeListener *dcl,

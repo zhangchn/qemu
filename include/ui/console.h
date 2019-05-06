@@ -223,6 +223,8 @@ typedef struct DisplayChangeListenerOps {
                                    uint32_t w, uint32_t h);
     void (*dpy_gl_scanout_dmabuf)(DisplayChangeListener *dcl,
                                   QemuDmaBuf *dmabuf);
+    void (*dpy_gl_overlay_dmabuf)(DisplayChangeListener *dcl,
+                                  QemuDmaBuf *dmabuf);
     void (*dpy_gl_cursor_dmabuf)(DisplayChangeListener *dcl,
                                  QemuDmaBuf *dmabuf, bool have_hot,
                                  uint32_t hot_x, uint32_t hot_y);
