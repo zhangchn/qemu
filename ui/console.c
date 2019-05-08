@@ -1796,6 +1796,16 @@ void dpy_gl_cursor_dmabuf(QemuConsole *con, QemuDmaBuf *dmabuf,
     }
 }
 
+void dpy_gl_overlay_dmabuf(QemuConsole *con, QemuDmaBuf *dmabuf,
+                            uint32_t pos_x, uint32_t pos_y)
+{
+    assert(con->gl);
+
+    if (con->gl->ops->dpy_gl_overlay_dmabuf) {
+        con->gl->ops->dpy_gl_overlay_dmabuf(con->gl, dmabuf, pos_x, pos_y);
+    }
+}
+
 void dpy_gl_cursor_position(QemuConsole *con,
                             uint32_t pos_x, uint32_t pos_y)
 {

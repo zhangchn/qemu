@@ -235,6 +235,29 @@ void gd_egl_cursor_dmabuf(DisplayChangeListener *dcl,
 #endif
 }
 
+void gd_egl_overlay_dmabuf(DisplayChangeListener *dcl,
+                           QemuDmaBuf *dmabuf,
+                           uint32_t pos_x, uint32_t pos_y)
+{
+#ifdef CONFIG_OPENGL_DMABUF
+    VirtualConsole *vc = container_of(dcl, VirtualConsole, gfx.dcl);
+
+    if (dmabuf) {
+        egl_dmabuf_import_texture(dmabuf);
+        if (!dmabuf->texture) {
+            return;
+        }
+        vc->gfx.overlay_x = pos_x * vc->gfx.scale_x;
+        vc->gfx.overlay_y = pos_y * vc->gfx.scale_y;
+        egl_fb_setup_for_tex(&vc->gfx.overlay_fb,
+                             dmabuf->width, dmabuf->height,
+                             dmabuf->texture, false);
+    } else {
+        egl_fb_destroy(&vc->gfx.overlay_fb);
+    }
+#endif
+}
+
 void gd_egl_cursor_position(DisplayChangeListener *dcl,
                             uint32_t pos_x, uint32_t pos_y)
 {
@@ -273,15 +296,23 @@ void gd_egl_scanout_flush(DisplayChangeListener *dcl,
     ww = gdk_window_get_width(window);
     wh = gdk_window_get_height(window);
     egl_fb_setup_default(&vc->gfx.win_fb, ww, wh);
-    if (vc->gfx.cursor_fb.texture) {
+    if (!vc->gfx.cursor_fb.texture && !vc->gfx.overlay_fb.texture) {
+        egl_fb_blit(&vc->gfx.win_fb, &vc->gfx.guest_fb, !vc->gfx.y0_top);
+    } else if (vc->gfx.cursor_fb.texture) {
         egl_texture_blit(vc->gfx.gls, &vc->gfx.win_fb, &vc->gfx.guest_fb,
                          vc->gfx.y0_top);
-        egl_texture_blend(vc->gfx.gls, &vc->gfx.win_fb, &vc->gfx.cursor_fb,
-                          vc->gfx.y0_top,
-                          vc->gfx.cursor_x, vc->gfx.cursor_y,
-                          vc->gfx.scale_x, vc->gfx.scale_y);
-    } else {
-        egl_fb_blit(&vc->gfx.win_fb, &vc->gfx.guest_fb, !vc->gfx.y0_top);
+        if (vc->gfx.overlay_fb.texture) {
+            egl_texture_blend(vc->gfx.gls, &vc->gfx.win_fb, &vc->gfx.overlay_fb,
+                              vc->gfx.y0_top,
+                              vc->gfx.overlay_x, vc->gfx.overlay_y,
+                              vc->gfx.scale_x, vc->gfx.scale_y);
+        }
+        if (vc->gfx.cursor_fb.texture) {
+            egl_texture_blend(vc->gfx.gls, &vc->gfx.win_fb, &vc->gfx.cursor_fb,
+                              vc->gfx.y0_top,
+                              vc->gfx.cursor_x, vc->gfx.cursor_y,
+                              vc->gfx.scale_x, vc->gfx.scale_y);
+        }
     }
 
     eglSwapBuffers(qemu_egl_display, vc->gfx.esurface);

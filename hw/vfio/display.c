@@ -196,14 +196,13 @@ static void vfio_display_update_overlay(VFIODMABuf *dmabuf,
 {
     if (dmabuf->pos_x != plane->x_pos ||
         dmabuf->pos_y != plane->y_pos ||
-        dmabuf->width != plane->width ||
-        dmabuf->height != plane->height)
+        dmabuf->buf.width != plane->width ||
+        dmabuf->buf.height != plane->height)
     {
         dmabuf->pos_x   = plane->x_pos;
         dmabuf->pos_y   = plane->y_pos;
-        dmabuf->width   = plane->width;
-        dmabuf->height  = plane->height;
-        dmabuf->pos_updates++;
+        dmabuf->buf.width   = plane->width;
+        dmabuf->buf.height  = plane->height;
     }
 }
 
@@ -271,7 +270,8 @@ static VFIODMABuf *vfio_display_get_dmabuf(VFIOPCIDevice *vdev,
     if (plane_type == DRM_PLANE_TYPE_CURSOR) {
         vfio_display_update_cursor(dmabuf, &plane);
     } else if (plane_type == DRM_PLANE_TYPE_OVERLAY) {
-        vfio_display_update_overlay(dmabuf, &plane);
+        dmabuf->pos_x = plane.x_pos;
+        dmabuf->pos_y = plane.y_pos;
     }
 
     QTAILQ_INSERT_HEAD(&dpy->dmabuf.bufs, dmabuf, next);
@@ -286,7 +286,7 @@ static void vfio_display_free_one_dmabuf(VFIODisplay *dpy, VFIODMABuf *dmabuf)
     g_free(dmabuf);
 }
 
-static void vfio_display_free_dmabufs(VFIOPCIDevice *vdev, uint32_t plane_type)
+static void vfio_display_free_dmabufs(VFIOPCIDevice *vdev)
 {
     VFIODisplay *dpy = vdev->dpy;
     VFIODMABuf *dmabuf, *tmp;
@@ -297,10 +297,8 @@ static void vfio_display_free_dmabufs(VFIOPCIDevice *vdev, uint32_t plane_type)
             keep--;
             continue;
         }
-        //assert(dmabuf != dpy->dmabuf.primary);
-        if (dmabuf->plane_type == plane_type) {
-            vfio_display_free_one_dmabuf(dpy, dmabuf);
-        }
+        assert(dmabuf != dpy->dmabuf.primary);
+        vfio_display_free_one_dmabuf(dpy, dmabuf);
     }
 }
 
@@ -309,7 +307,7 @@ static void vfio_display_dmabuf_update(void *opaque)
     VFIOPCIDevice *vdev = opaque;
     VFIODisplay *dpy = vdev->dpy;
     VFIODMABuf *primary, *cursor, *overlay;
-    bool free_bufs = false, new_cursor = false;;
+    bool free_bufs = false, new_cursor = false;
 
     primary = vfio_display_get_dmabuf(vdev, DRM_PLANE_TYPE_PRIMARY);
     if (primary == NULL) {
@@ -329,11 +327,14 @@ static void vfio_display_dmabuf_update(void *opaque)
 
     overlay = vfio_display_get_dmabuf(vdev, DRM_PLANE_TYPE_OVERLAY);
     if (dpy->dmabuf.overlay != overlay) {
-        new_overlay = true;
-        free_old_overlay = true;
+        dpy->dmabuf.overlay = overlay;
     }
-    if (overlay && (new_overlay || overlay->pos_updates)) {
-        // todo: call dpy_gl_overlay_dmabuf()
+    if (overlay) {
+        // blend overlay plane
+        dpy_gl_overlay_dmabuf(dpy->con, &overlay->buf,
+                              overlay->pos_x, overlay->pos_y);
+    } else {
+        dpy_gl_overlay_dmabuf(dpy->con, NULL, 0, 0);
     }
 
     cursor = vfio_display_get_dmabuf(vdev, DRM_PLANE_TYPE_CURSOR);
@@ -363,10 +364,7 @@ static void vfio_display_dmabuf_update(void *opaque)
     dpy_gl_update(dpy->con, 0, 0, primary->buf.width, primary->buf.height);
 
     if (free_bufs) {
-        vfio_display_free_dmabufs(vdev, DRM_PLANE_TYPE_CURSOR);
-    }
-    if (free_old_overlay) {
-        vfio_display_free_dmabufs(vdev, DRM_PLANE_TYPE_OVERLAY);
+        vfio_display_free_dmabufs(vdev);
     }
 }
 
