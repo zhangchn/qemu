@@ -496,10 +496,9 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
             CGImageRelease (clipImageRef);
 
         }
-        CGRect cursorDrawRect = stretch_video ?
-                                    [self convertRectFromQemuScreen:cursorRect] : cursorRect;
-        if (cursorVisible && cursorImage && NSIntersectsRect(rect, cursorDrawRect)) {
-            CGContextDrawImage (viewContextRef, cursorDrawRect, cursorImage);
+        // CGRect cursorDrawRect = [self cursorRect];
+        if (cursorVisible && cursorImage && NSIntersectsRect(rect, cursorRect)) {
+            CGContextDrawImage (viewContextRef, cursorRect, cursorImage);
         }
         CGImageRelease (imageRef);
         CGDataProviderRelease(dataProviderRef);
@@ -612,8 +611,8 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 
     info.xoff = 0;
     info.yoff = 0;
-    info.width = frameSize.width;
-    info.height = frameSize.height;
+    info.width = frameSize.width * 2;
+    info.height = frameSize.height * 2;
 
     dpy_set_ui_info(dcl.con, &info, TRUE);
 }
@@ -1167,10 +1166,12 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 - (CGRect) convertRectFromQemuScreen:(CGRect)rect
 {
     CGRect viewRect = rect;
-    viewRect.origin.x *= cdx;
-    viewRect.origin.y *= cdy;
-    viewRect.size.width *= cdx;
-    viewRect.size.height *= cdy;
+    if (cdx != 0 && cdy != 0) {
+        viewRect.origin.x /= cdx;
+        viewRect.origin.y /= cdy;
+        viewRect.size.width /= cdx;
+        viewRect.size.height /= cdy;
+    }
     return viewRect;
 }
 /*
@@ -2010,7 +2011,20 @@ static void cocoa_update(DisplayChangeListener *dcl,
     COCOA_DEBUG("qemu_cocoa: cocoa_update\n");
 
     dispatch_async(dispatch_get_main_queue(), ^{
-        NSRect rect = NSMakeRect(x, [cocoaView gscreen].height - y - h, w, h);
+        NSRect rect;
+	/*
+        if ([cocoaView cdx] == 1.0) {
+            rect = NSMakeRect(x, [cocoaView gscreen].height - y - h, w, h);
+        } else {
+	*/
+            rect = NSMakeRect(
+                x * [cocoaView cdx],
+                ([cocoaView gscreen].height - y - h) * [cocoaView cdy],
+                w * [cocoaView cdx],
+                h * [cocoaView cdy]);
+	/*
+        }
+	*/
         [cocoaView setNeedsDisplayInRect:rect];
     });
 }
@@ -2057,6 +2071,8 @@ static void cocoa_refresh(DisplayChangeListener *dcl)
 static void cocoa_cursor_define(DisplayChangeListener *dcl, QEMUCursor *c)
 {
     NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
+
+    COCOA_DEBUG("qemu_cocoa: cocoa_cursor_define\n");
     int bitsPerComponent = [cocoaView gscreen].bitsPerComponent;
     int bitsPerPixel = [cocoaView gscreen].bitsPerPixel;
     int stride = c->width * bitsPerComponent / 2;
@@ -2082,7 +2098,7 @@ static void cocoa_cursor_define(DisplayChangeListener *dcl, QEMUCursor *c)
     dispatch_async(dispatch_get_main_queue(), ^{
         [cocoaView setCursorImage:img];
         CGRect rect = [cocoaView cursorRect];
-        rect.size = CGSizeMake(width, height);
+        rect.size = CGSizeMake(width / 2, height / 2);
         [cocoaView setCursorRect:rect];
     });
     [pool release];
@@ -2092,21 +2108,21 @@ static void cocoa_mouse_set(DisplayChangeListener *dcl,
                             int x, int y, int visible)
 {
     NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
+
+    COCOA_DEBUG("qemu_cocoa: cocoa_mouse_set\n");
     dispatch_async(dispatch_get_main_queue(), ^{
         QEMUScreen screen = [cocoaView gscreen];
         // Mark old cursor rect as dirty
         CGRect rect = [cocoaView cursorRect];
-        CGRect dirtyRect = stretch_video ?
-                        [cocoaView convertRectFromQemuScreen:rect] : rect;
-        [cocoaView setNeedsDisplayInRect:dirtyRect];
+        // CGRect dirtyRect = rect; // [cocoaView convertRectFromQemuScreen:rect];
+        [cocoaView setNeedsDisplayInRect:rect];
         // Update rect for cursor sprite
-        rect.origin = CGPointMake(x, screen.height - (y + rect.size.height));
+        rect.origin = CGPointMake(x / 2, (screen.height - y) / 2 - rect.size.height);
         [cocoaView setCursorRect:rect];
         [cocoaView setCursorVisible:visible ? YES : NO];
         // Mark new cursor rect as dirty
-        dirtyRect = stretch_video ?
-                        [cocoaView convertRectFromQemuScreen:rect] : rect;
-        [cocoaView setNeedsDisplayInRect:dirtyRect];
+        // dirtyRect = [cocoaView convertRectFromQemuScreen:rect];
+        [cocoaView setNeedsDisplayInRect:rect];
     });
     [pool release];
 }
