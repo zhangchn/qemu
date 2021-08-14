@@ -60,7 +60,7 @@
 #define NSControlStateValueOff NSOffState
 #endif
 
-//#define DEBUG
+// #define DEBUG
 
 #ifdef DEBUG
 #define COCOA_DEBUG(...)  { (void) fprintf (stdout, __VA_ARGS__); }
@@ -358,8 +358,8 @@ QemuCocoaView *cocoaView;
 
         screen.bitsPerComponent = 8;
         screen.bitsPerPixel = 32;
-        screen.width = frameRect.size.width;
-        screen.height = frameRect.size.height;
+        screen.width = frameRect.size.width * 2;
+        screen.height = frameRect.size.height * 2;
         kbd = qkbd_state_init(dcl.con);
 
     }
@@ -396,30 +396,34 @@ QemuCocoaView *cocoaView;
     CGRect r = CGRectZero;
     r.origin = [ev locationInWindow];
     if (!eventWindow) {
-        if (!isFullscreen) {
+        /* if (!isFullscreen) {
             return [[self window] convertRectFromScreen:r].origin;
-        } else {
+        } else { */
             CGPoint locationInSelfWindow = [[self window] convertRectFromScreen:r].origin;
             CGPoint loc = [self convertPoint:locationInSelfWindow fromView:nil];
-            if (stretch_video) {
+            //if (stretch_video) {
                 loc.x /= cdx;
                 loc.y /= cdy;
-            }
+            //}
             return loc;
-        }
+        //}
     } else if ([[self window] isEqual:eventWindow]) {
-        if (!isFullscreen) {
+        /*if (!isFullscreen) {
             return r.origin;
-        } else {
+        } else { */
             CGPoint loc = [self convertPoint:r.origin fromView:nil];
-            if (stretch_video) {
+            //if (stretch_video) {
                 loc.x /= cdx;
                 loc.y /= cdy;
-            }
+            //}
             return loc;
-        }
+        //}
     } else {
-        return [[self window] convertRectFromScreen:[eventWindow convertRectToScreen:r]].origin;
+        //return [[self window] convertRectFromScreen:[eventWindow convertRectToScreen:r]].origin;
+        CGPoint loc = [[self window] convertRectFromScreen:[eventWindow convertRectToScreen:r]].origin;
+        loc.x /= cdx;
+        loc.y /= cdy;
+        return loc;
     }
 }
 
@@ -500,10 +504,9 @@ QemuCocoaView *cocoaView;
             CGImageRelease (clipImageRef);
 
         }
-        CGRect cursorDrawRect = stretch_video ?
-                                    [self convertRectFromQemuScreen:cursorRect] : cursorRect;
-        if (cursorVisible && cursorImage && NSIntersectsRect(rect, cursorDrawRect)) {
-            CGContextDrawImage (viewContextRef, cursorDrawRect, cursorImage);
+        // CGRect cursorDrawRect = [self cursorRect];
+        if (cursorVisible && cursorImage && NSIntersectsRect(rect, cursorRect)) {
+            CGContextDrawImage (viewContextRef, cursorRect, cursorImage);
         }
         CGImageRelease (imageRef);
         CGDataProviderRelease(dataProviderRef);
@@ -515,8 +518,8 @@ QemuCocoaView *cocoaView;
     COCOA_DEBUG("QemuCocoaView: setContentDimensions\n");
 
     if (isFullscreen) {
-        cdx = [[NSScreen mainScreen] frame].size.width / (float)screen.width;
-        cdy = [[NSScreen mainScreen] frame].size.height / (float)screen.height;
+        cdx = [[NSScreen mainScreen] frame].size.width / (float)screen.width / 2.0;
+        cdy = [[NSScreen mainScreen] frame].size.height / (float)screen.height / 2.0;
 
         /* stretches video, but keeps same aspect ratio */
         if (stretch_video == true) {
@@ -527,7 +530,7 @@ QemuCocoaView *cocoaView;
                 cdx = cdy;
             }
         } else {  /* No stretching */
-            cdx = cdy = 1;
+            cdx = cdy = 1 / 2.0;
         }
         cw = screen.width * cdx;
         ch = screen.height * cdy;
@@ -536,11 +539,12 @@ QemuCocoaView *cocoaView;
     } else {
         cx = 0;
         cy = 0;
-        cw = screen.width;
-        ch = screen.height;
-        cdx = 1.0;
-        cdy = 1.0;
+        cw = screen.width / 2;
+        ch = screen.height / 2;
+        cdx = 1.0 / 2;
+        cdy = 1.0 / 2;
     }
+    NSLog(@"cxcycwchcdxcdy: %.1f %.1f %.1f %.1f %.1f %.1f", cx, cy, cw, ch, cdx, cdy);
 }
 
 - (void) updateUIInfo
@@ -569,8 +573,8 @@ QemuCocoaView *cocoaView;
 
     info.xoff = 0;
     info.yoff = 0;
-    info.width = frameSize.width;
-    info.height = frameSize.height;
+    info.width = frameSize.width * 2;
+    info.height = frameSize.height * 2;
 
     dpy_set_ui_info(dcl.con, &info, TRUE);
 }
@@ -610,13 +614,22 @@ QemuCocoaView *cocoaView;
     pixman_image = image;
 
     // update windows
+
+    CGFloat dh = h - oldh;
+    NSLog(@"old normal window size: %.1f %.1f", [normalWindow frame].size.width, [normalWindow frame].size.height);
+    NSRect f = NSMakeRect(
+            [normalWindow frame].origin.x,
+            [normalWindow frame].origin.y - dh / 2.0,
+            w / 2.0,
+            [normalWindow frame].size.height + dh / 2.0);
+    NSLog(@"normal window size: %.1f, %.1f; oldh: %.1f, h: %.1f", f.size.width, f.size.height, oldh, h);
     if (isFullscreen) {
         [[fullScreenWindow contentView] setFrame:[[NSScreen mainScreen] frame]];
-        [normalWindow setFrame:NSMakeRect([normalWindow frame].origin.x, [normalWindow frame].origin.y - h + oldh, w, h + [normalWindow frame].size.height - oldh) display:NO animate:NO];
+        [normalWindow setFrame:f display:NO animate:NO];
     } else {
         if (qemu_name)
             [normalWindow setTitle:[NSString stringWithFormat:@"QEMU %s", qemu_name]];
-        [normalWindow setFrame:NSMakeRect([normalWindow frame].origin.x, [normalWindow frame].origin.y - h + oldh, w, h + [normalWindow frame].size.height - oldh) display:YES animate:NO];
+        [normalWindow setFrame:f display:YES animate:NO];
     }
 
     if (isResize) {
@@ -1111,10 +1124,12 @@ QemuCocoaView *cocoaView;
 - (CGRect) convertRectFromQemuScreen:(CGRect)rect
 {
     CGRect viewRect = rect;
-    viewRect.origin.x *= cdx;
-    viewRect.origin.y *= cdy;
-    viewRect.size.width *= cdx;
-    viewRect.size.height *= cdy;
+    if (cdx != 0 && cdy != 0) {
+        viewRect.origin.x /= cdx;
+        viewRect.origin.y /= cdy;
+        viewRect.size.width /= cdx;
+        viewRect.size.height /= cdy;
+    }
     return viewRect;
 }
 /*
@@ -2007,15 +2022,19 @@ static void cocoa_update(DisplayChangeListener *dcl,
 
     dispatch_async(dispatch_get_main_queue(), ^{
         NSRect rect;
+	/*
         if ([cocoaView cdx] == 1.0) {
             rect = NSMakeRect(x, [cocoaView gscreen].height - y - h, w, h);
         } else {
+	*/
             rect = NSMakeRect(
                 x * [cocoaView cdx],
                 ([cocoaView gscreen].height - y - h) * [cocoaView cdy],
                 w * [cocoaView cdx],
                 h * [cocoaView cdy]);
+	/*
         }
+	*/
         [cocoaView setNeedsDisplayInRect:rect];
     });
 
@@ -2048,7 +2067,7 @@ static void cocoa_refresh(DisplayChangeListener *dcl)
 {
     NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
 
-    COCOA_DEBUG("qemu_cocoa: cocoa_refresh\n");
+    //COCOA_DEBUG("qemu_cocoa: cocoa_refresh\n");
     graphic_hw_update(NULL);
 
     if (qemu_input_is_absolute()) {
@@ -2079,6 +2098,8 @@ static void cocoa_refresh(DisplayChangeListener *dcl)
 static void cocoa_cursor_define(DisplayChangeListener *dcl, QEMUCursor *c)
 {
     NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
+
+    COCOA_DEBUG("qemu_cocoa: cocoa_cursor_define\n");
     int bitsPerComponent = [cocoaView gscreen].bitsPerComponent;
     int bitsPerPixel = [cocoaView gscreen].bitsPerPixel;
     int stride = c->width * bitsPerComponent / 2;
@@ -2104,7 +2125,7 @@ static void cocoa_cursor_define(DisplayChangeListener *dcl, QEMUCursor *c)
     dispatch_async(dispatch_get_main_queue(), ^{
         [cocoaView setCursorImage:img];
         CGRect rect = [cocoaView cursorRect];
-        rect.size = CGSizeMake(width, height);
+        rect.size = CGSizeMake(width / 2, height / 2);
         [cocoaView setCursorRect:rect];
     });
     [pool release];
@@ -2114,21 +2135,21 @@ static void cocoa_mouse_set(DisplayChangeListener *dcl,
                             int x, int y, int visible)
 {
     NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
+
+    COCOA_DEBUG("qemu_cocoa: cocoa_mouse_set\n");
     dispatch_async(dispatch_get_main_queue(), ^{
         QEMUScreen screen = [cocoaView gscreen];
         // Mark old cursor rect as dirty
         CGRect rect = [cocoaView cursorRect];
-        CGRect dirtyRect = stretch_video ?
-                        [cocoaView convertRectFromQemuScreen:rect] : rect;
-        [cocoaView setNeedsDisplayInRect:dirtyRect];
+        // CGRect dirtyRect = rect; // [cocoaView convertRectFromQemuScreen:rect];
+        [cocoaView setNeedsDisplayInRect:rect];
         // Update rect for cursor sprite
-        rect.origin = CGPointMake(x, screen.height - (y + rect.size.height));
+        rect.origin = CGPointMake(x / 2, (screen.height - y) / 2 - rect.size.height);
         [cocoaView setCursorRect:rect];
         [cocoaView setCursorVisible:visible ? YES : NO];
         // Mark new cursor rect as dirty
-        dirtyRect = stretch_video ?
-                        [cocoaView convertRectFromQemuScreen:rect] : rect;
-        [cocoaView setNeedsDisplayInRect:dirtyRect];
+        // dirtyRect = [cocoaView convertRectFromQemuScreen:rect];
+        [cocoaView setNeedsDisplayInRect:rect];
     });
     [pool release];
 }
