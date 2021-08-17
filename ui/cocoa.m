@@ -319,6 +319,7 @@ static void handleAnyDeviceErrors(Error * err)
     CGRect cursorRect;
     CGImageRef cursorImage;
     BOOL cursorVisible;
+    float currentContentsScale;
 }
 - (void) switchSurface:(pixman_image_t *)image;
 - (void) grabMouse;
@@ -369,10 +370,11 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 
         [self addTrackingArea:trackingArea];
         [trackingArea release];
+        currentContentsScale = [[NSScreen mainScreen] backingScaleFactor];
         screen.bitsPerComponent = 8;
         screen.bitsPerPixel = 32;
-        screen.width = frameRect.size.width;
-        screen.height = frameRect.size.height;
+        screen.width = frameRect.size.width * currentContentsScale;
+        screen.height = frameRect.size.height * currentContentsScale;
 #if MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_VERSION_14_0
         [self setClipsToBounds:YES];
 #endif
@@ -582,6 +584,7 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     }
 
     if ([self window]) {
+        currentContentsScale = [[[self window] screen] backingScaleFactor];
         NSDictionary *description = [[[self window] screen] deviceDescription];
         CGDirectDisplayID display = [[description objectForKey:@"NSScreenNumber"] unsignedIntValue];
         NSSize screenSize = [[[self window] screen] frame].size;
@@ -601,8 +604,8 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
             }
         }
 
-        info.width_mm = frameSize.width / screenSize.width * screenPhysicalSize.width;
-        info.height_mm = frameSize.height / screenSize.height * screenPhysicalSize.height;
+        info.width_mm = frameSize.width / screenSize.width / currentContentsScale * screenPhysicalSize.width;
+        info.height_mm = frameSize.height / screenSize.height / currentContentsScale * screenPhysicalSize.height;
     } else {
         frameSize = [self frame].size;
         info.width_mm = 0;
@@ -611,8 +614,8 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 
     info.xoff = 0;
     info.yoff = 0;
-    info.width = frameSize.width * 2;
-    info.height = frameSize.height * 2;
+    info.width = frameSize.width * currentContentsScale;
+    info.height = frameSize.height * currentContentsScale;
 
     dpy_set_ui_info(dcl.con, &info, TRUE);
 }
@@ -2075,7 +2078,8 @@ static void cocoa_cursor_define(DisplayChangeListener *dcl, QEMUCursor *c)
     COCOA_DEBUG("qemu_cocoa: cocoa_cursor_define\n");
     int bitsPerComponent = [cocoaView gscreen].bitsPerComponent;
     int bitsPerPixel = [cocoaView gscreen].bitsPerPixel;
-    int stride = c->width * bitsPerComponent / 2;
+    float contentsScale = [cocoaView currentContentsScale];
+    int stride = c->width * bitsPerComponent / contentsScale;
     CGDataProviderRef provider = CGDataProviderCreateWithData(NULL, c->data, c->width * 4 * c->height, NULL);
 
     CGImageRef img = CGImageCreate(
@@ -2098,7 +2102,7 @@ static void cocoa_cursor_define(DisplayChangeListener *dcl, QEMUCursor *c)
     dispatch_async(dispatch_get_main_queue(), ^{
         [cocoaView setCursorImage:img];
         CGRect rect = [cocoaView cursorRect];
-        rect.size = CGSizeMake(width / 2, height / 2);
+        rect.size = CGSizeMake(width / contentsScale, height / contentsScale);
         [cocoaView setCursorRect:rect];
     });
     [pool release];
@@ -2112,16 +2116,15 @@ static void cocoa_mouse_set(DisplayChangeListener *dcl,
     COCOA_DEBUG("qemu_cocoa: cocoa_mouse_set\n");
     dispatch_async(dispatch_get_main_queue(), ^{
         QEMUScreen screen = [cocoaView gscreen];
+        float contentsScale = [cocoaView currentContentsScale];
         // Mark old cursor rect as dirty
         CGRect rect = [cocoaView cursorRect];
-        // CGRect dirtyRect = rect; // [cocoaView convertRectFromQemuScreen:rect];
         [cocoaView setNeedsDisplayInRect:rect];
         // Update rect for cursor sprite
-        rect.origin = CGPointMake(x / 2, (screen.height - y) / 2 - rect.size.height);
+        rect.origin = CGPointMake(x / contentsScale, (screen.height - y) / contentsScale - rect.size.height);
         [cocoaView setCursorRect:rect];
         [cocoaView setCursorVisible:visible ? YES : NO];
         // Mark new cursor rect as dirty
-        // dirtyRect = [cocoaView convertRectFromQemuScreen:rect];
         [cocoaView setNeedsDisplayInRect:rect];
     });
     [pool release];
