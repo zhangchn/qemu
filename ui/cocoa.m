@@ -321,6 +321,7 @@ static void handleAnyDeviceErrors(Error * err)
     CGRect cursorRect;
     CGImageRef cursorImage;
     BOOL cursorVisible;
+    float currentContentsScale;
 }
 - (void) switchSurface:(pixman_image_t *)image;
 - (void) grabMouse;
@@ -342,6 +343,7 @@ static void handleAnyDeviceErrors(Error * err)
 - (BOOL) isAbsoluteEnabled;
 - (float) cdx;
 - (float) cdy;
+- (float) currentContentsScale;
 - (QEMUScreen) gscreen;
 - (void) raiseAllKeys;
 @end
@@ -356,10 +358,11 @@ QemuCocoaView *cocoaView;
     self = [super initWithFrame:frameRect];
     if (self) {
 
+        currentContentsScale = [[NSScreen mainScreen] backingScaleFactor];
         screen.bitsPerComponent = 8;
         screen.bitsPerPixel = 32;
-        screen.width = frameRect.size.width * 2;
-        screen.height = frameRect.size.height * 2;
+        screen.width = frameRect.size.width * currentContentsScale;
+        screen.height = frameRect.size.height * currentContentsScale;
         kbd = qkbd_state_init(dcl.con);
 
     }
@@ -518,8 +521,8 @@ QemuCocoaView *cocoaView;
     COCOA_DEBUG("QemuCocoaView: setContentDimensions\n");
 
     if (isFullscreen) {
-        cdx = [[NSScreen mainScreen] frame].size.width / (float)screen.width / 2.0;
-        cdy = [[NSScreen mainScreen] frame].size.height / (float)screen.height / 2.0;
+        cdx = [[NSScreen mainScreen] frame].size.width / (float)screen.width / currentContentsScale;
+        cdy = [[NSScreen mainScreen] frame].size.height / (float)screen.height / currentContentsScale;
 
         /* stretches video, but keeps same aspect ratio */
         if (stretch_video == true) {
@@ -530,21 +533,21 @@ QemuCocoaView *cocoaView;
                 cdx = cdy;
             }
         } else {  /* No stretching */
-            cdx = cdy = 1 / 2.0;
+            cdx = cdy = 1 / currentContentsScale;
         }
         cw = screen.width * cdx;
         ch = screen.height * cdy;
-        cx = ([[NSScreen mainScreen] frame].size.width - cw) / 2.0;
-        cy = ([[NSScreen mainScreen] frame].size.height - ch) / 2.0;
+        cx = ([[NSScreen mainScreen] frame].size.width - cw) / currentContentsScale;
+        cy = ([[NSScreen mainScreen] frame].size.height - ch) / currentContentsScale;
     } else {
         cx = 0;
         cy = 0;
-        cw = screen.width / 2;
-        ch = screen.height / 2;
-        cdx = 1.0 / 2;
-        cdy = 1.0 / 2;
+        cw = screen.width / currentContentsScale;
+        ch = screen.height / currentContentsScale;
+        cdx = 1.0 / currentContentsScale;
+        cdy = 1.0 / currentContentsScale;
     }
-    NSLog(@"cxcycwchcdxcdy: %.1f %.1f %.1f %.1f %.1f %.1f", cx, cy, cw, ch, cdx, cdy);
+    // NSLog(@"cxcycwchcdxcdy: %.1f %.1f %.1f %.1f %.1f %.1f", cx, cy, cw, ch, cdx, cdy);
 }
 
 - (void) updateUIInfo
@@ -557,14 +560,15 @@ QemuCocoaView *cocoaView;
     }
 
     if ([self window]) {
+        currentContentsScale = [[[self window] screen] backingScaleFactor];
         NSDictionary *description = [[[self window] screen] deviceDescription];
         CGDirectDisplayID display = [[description objectForKey:@"NSScreenNumber"] unsignedIntValue];
         NSSize screenSize = [[[self window] screen] frame].size;
         CGSize screenPhysicalSize = CGDisplayScreenSize(display);
 
         frameSize = isFullscreen ? screenSize : [self frame].size;
-        info.width_mm = frameSize.width / screenSize.width * screenPhysicalSize.width;
-        info.height_mm = frameSize.height / screenSize.height * screenPhysicalSize.height;
+        info.width_mm = frameSize.width / screenSize.width / currentContentsScale * screenPhysicalSize.width;
+        info.height_mm = frameSize.height / screenSize.height / currentContentsScale * screenPhysicalSize.height;
     } else {
         frameSize = [self frame].size;
         info.width_mm = 0;
@@ -573,8 +577,8 @@ QemuCocoaView *cocoaView;
 
     info.xoff = 0;
     info.yoff = 0;
-    info.width = frameSize.width * 2;
-    info.height = frameSize.height * 2;
+    info.width = frameSize.width * currentContentsScale;
+    info.height = frameSize.height * currentContentsScale;
 
     dpy_set_ui_info(dcl.con, &info, TRUE);
 }
@@ -616,13 +620,13 @@ QemuCocoaView *cocoaView;
     // update windows
 
     CGFloat dh = h - oldh;
-    NSLog(@"old normal window size: %.1f %.1f", [normalWindow frame].size.width, [normalWindow frame].size.height);
+    //NSLog(@"old normal window size: %.1f %.1f", [normalWindow frame].size.width, [normalWindow frame].size.height);
     NSRect f = NSMakeRect(
-            [normalWindow frame].origin.x,
-            [normalWindow frame].origin.y - dh / 2.0,
-            w / 2.0,
-            [normalWindow frame].size.height + dh / 2.0);
-    NSLog(@"normal window size: %.1f, %.1f; oldh: %.1f, h: %.1f", f.size.width, f.size.height, oldh, h);
+        [normalWindow frame].origin.x,
+        [normalWindow frame].origin.y - dh / currentContentsScale,
+        w / currentContentsScale,
+        [normalWindow frame].size.height + dh / currentContentsScale);
+    //NSLog(@"normal window size: %.1f, %.1f; oldh: %.1f, h: %.1f", f.size.width, f.size.height, oldh, h);
     if (isFullscreen) {
         [[fullScreenWindow contentView] setFrame:[[NSScreen mainScreen] frame]];
         [normalWindow setFrame:f display:NO animate:NO];
@@ -1106,6 +1110,7 @@ QemuCocoaView *cocoaView;
 - (BOOL) isAbsoluteEnabled {return isAbsoluteEnabled;}
 - (float) cdx {return cdx;}
 - (float) cdy {return cdy;}
+- (float) currentContentsScale {return currentContentsScale;}
 - (QEMUScreen) gscreen {return screen;}
 
 - (CGRect) cursorRect {return cursorRect;}
@@ -2067,7 +2072,7 @@ static void cocoa_refresh(DisplayChangeListener *dcl)
 {
     NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
 
-    //COCOA_DEBUG("qemu_cocoa: cocoa_refresh\n");
+    COCOA_DEBUG("qemu_cocoa: cocoa_refresh\n");
     graphic_hw_update(NULL);
 
     if (qemu_input_is_absolute()) {
@@ -2102,7 +2107,8 @@ static void cocoa_cursor_define(DisplayChangeListener *dcl, QEMUCursor *c)
     COCOA_DEBUG("qemu_cocoa: cocoa_cursor_define\n");
     int bitsPerComponent = [cocoaView gscreen].bitsPerComponent;
     int bitsPerPixel = [cocoaView gscreen].bitsPerPixel;
-    int stride = c->width * bitsPerComponent / 2;
+    float contentsScale = [cocoaView currentContentsScale];
+    int stride = c->width * bitsPerComponent / contentsScale;
     CGDataProviderRef provider = CGDataProviderCreateWithData(NULL, c->data, c->width * 4 * c->height, NULL);
 
     CGImageRef img = CGImageCreate(
@@ -2125,7 +2131,7 @@ static void cocoa_cursor_define(DisplayChangeListener *dcl, QEMUCursor *c)
     dispatch_async(dispatch_get_main_queue(), ^{
         [cocoaView setCursorImage:img];
         CGRect rect = [cocoaView cursorRect];
-        rect.size = CGSizeMake(width / 2, height / 2);
+        rect.size = CGSizeMake(width / contentsScale, height / contentsScale);
         [cocoaView setCursorRect:rect];
     });
     [pool release];
@@ -2139,16 +2145,15 @@ static void cocoa_mouse_set(DisplayChangeListener *dcl,
     COCOA_DEBUG("qemu_cocoa: cocoa_mouse_set\n");
     dispatch_async(dispatch_get_main_queue(), ^{
         QEMUScreen screen = [cocoaView gscreen];
+        float contentsScale = [cocoaView currentContentsScale];
         // Mark old cursor rect as dirty
         CGRect rect = [cocoaView cursorRect];
-        // CGRect dirtyRect = rect; // [cocoaView convertRectFromQemuScreen:rect];
         [cocoaView setNeedsDisplayInRect:rect];
         // Update rect for cursor sprite
-        rect.origin = CGPointMake(x / 2, (screen.height - y) / 2 - rect.size.height);
+        rect.origin = CGPointMake(x / contentsScale, (screen.height - y) / contentsScale - rect.size.height);
         [cocoaView setCursorRect:rect];
         [cocoaView setCursorVisible:visible ? YES : NO];
         // Mark new cursor rect as dirty
-        // dirtyRect = [cocoaView convertRectFromQemuScreen:rect];
         [cocoaView setNeedsDisplayInRect:rect];
     });
     [pool release];
