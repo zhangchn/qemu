@@ -46,6 +46,7 @@
 #include "qemu/module.h"
 #include <Carbon/Carbon.h>
 #include "hw/core/cpu.h"
+#include "metal.h"
 
 #ifndef MAC_OS_X_VERSION_10_13
 #define MAC_OS_X_VERSION_10_13 101300
