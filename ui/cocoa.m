@@ -49,6 +49,7 @@
 #include "qemu/error-report.h"
 #include <Carbon/Carbon.h>
 #include "hw/core/cpu.h"
+#include "metal.h"
 
 #ifndef MAC_OS_VERSION_14_0
 #define MAC_OS_VERSION_14_0 140000
