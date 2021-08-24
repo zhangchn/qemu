@@ -29,7 +29,9 @@ system_ss.add(when: spice_protocol, if_true: files('vdagent.c'))
 if host_os == 'linux'
   system_ss.add(files('input-linux.c', 'udmabuf.c'))
 endif
-system_ss.add(when: cocoa, if_true: files('cocoa.m', 'metal.m'))
+
+system_ss.add(when: cocoa, if_true: files('cocoa.m'))
+system_ss.add(when: metalkit, if_true: [files('metal.m'), metalkit])
 
 vnc_ss = ss.source_set()
 vnc_ss.add(files(

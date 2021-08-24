@@ -715,6 +715,9 @@ midl = not_found
 widl = not_found
 pathcch = not_found
 host_dsosuf = '.so'
+metal = []
+metalkit = []
+
 if host_os == 'windows'
   midl = find_program('midl', required: false)
   widl = find_program('widl', required: false)
@@ -729,6 +732,8 @@ if host_os == 'windows'
   host_dsosuf = '.dll'
 elif host_os == 'darwin'
   coref = dependency('appleframeworks', modules: 'CoreFoundation')
+  metal = dependency('appleframeworks', modules: 'Metal')
+  metalkit = dependency('appleframeworks', modules: 'MetalKit')
   iokit = dependency('appleframeworks', modules: 'IOKit', required: false)
   host_dsosuf = '.dylib'
 elif host_os == 'sunos'

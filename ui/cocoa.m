@@ -336,6 +336,7 @@ static void handleAnyDeviceErrors(Error * err)
 @end
 
 QemuCocoaView *cocoaView;
+QemuMetalView *metalView;
 
 static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEventRef cgEvent, void *userInfo)
 {
@@ -1246,6 +1247,9 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
             exit(1);
         }
 
+        metalView = [[QemuMetalView alloc] initWithFrame:NSMakeRect(0.0, 0.0, 640.0, 480.0)];
+        metalView.device = MTLCreateSystemDefaultDevice();
+
         // create a window
         window = [[NSWindow alloc] initWithContentRect:[cocoaView frame]
             styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskMiniaturizable|NSWindowStyleMaskClosable
@@ -1262,6 +1266,21 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
         [window center];
         [window setDelegate: self];
 
+        // create a metal window
+        metalWindow = [[NSWindow alloc] initWithContentRect:[metalView frame]
+            styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskMiniaturizable|NSWindowStyleMaskClosable
+            backing:NSBackingStoreBuffered defer:NO];
+        if(!metalWindow) {
+            error_report("(cocoa) can't create window");
+            exit(1);
+        }
+        [metalWindow setAcceptsMouseMovedEvents:YES];
+        [metalWindow setTitle:@"QEMUMetal"];
+        [metalWindow setContentView:metalView];
+        [metalWindow makeKeyAndOrderFront:self];
+        [metalWindow center];
+        [metalWindow setDelegate: self];
+ 
         /* Used for displaying pause on the screen */
         pauseLabel = [NSTextField new];
         [pauseLabel setBezeled:YES];
@@ -1283,6 +1302,8 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 
     if (cocoaView)
         [cocoaView release];
+    if (metalView)
+	[metalView release];
     [super dealloc];
 }
 
@@ -1324,6 +1345,7 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 - (void)windowDidChangeScreen:(NSNotification *)notification
 {
     [cocoaView updateUIInfo];
+    [metalView updateUIInfo];
 }
 
 - (void)windowDidEnterFullScreen:(NSNotification *)notification
