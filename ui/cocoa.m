@@ -92,6 +92,7 @@ static void cocoa_mouse_set(DisplayChangeListener *dcl,
 static void cocoa_cursor_define(DisplayChangeListener *dcl, QEMUCursor *c);
 
 static NSWindow *normalWindow, *about_window;
+static NSWindow *metalWindow;
 static const DisplayChangeListenerOps dcl_ops = {
     .dpy_name          = "cocoa",
     .dpy_gfx_update = cocoa_update,
@@ -350,6 +351,7 @@ static void handleAnyDeviceErrors(Error * err)
 @end
 
 QemuCocoaView *cocoaView;
+QemuMetalView *metalView;
 
 @implementation QemuCocoaView
 - (id)initWithFrame:(NSRect)frameRect
@@ -631,11 +633,14 @@ QemuCocoaView *cocoaView;
     if (isFullscreen) {
         [[fullScreenWindow contentView] setFrame:[[NSScreen mainScreen] frame]];
         [normalWindow setFrame:f display:NO animate:NO];
+	[metalWindow setFrame:f display:NO animate:NO];
     } else {
         if (qemu_name)
             [normalWindow setTitle:[NSString stringWithFormat:@"QEMU %s", qemu_name]];
         [normalWindow setFrame:f display:YES animate:NO];
+	[metalWindow setFrame:f display:YES animate:NO];
     }
+
 
     if (isResize) {
         [normalWindow center];
@@ -1197,6 +1202,9 @@ QemuCocoaView *cocoaView;
             exit(1);
         }
 
+        metalView = [[QemuMetalView alloc] initWithFrame:NSMakeRect(0.0, 0.0, 640.0, 480.0)];
+        metalView.device = MTLCreateSystemDefaultDevice();
+
         // create a window
         normalWindow = [[NSWindow alloc] initWithContentRect:[cocoaView frame]
             styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskMiniaturizable|NSWindowStyleMaskClosable
@@ -1213,6 +1221,21 @@ QemuCocoaView *cocoaView;
         [normalWindow setDelegate: self];
         stretch_video = false;
 
+        // create a metal window
+        metalWindow = [[NSWindow alloc] initWithContentRect:[metalView frame]
+            styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskMiniaturizable|NSWindowStyleMaskClosable
+            backing:NSBackingStoreBuffered defer:NO];
+        if(!metalWindow) {
+            error_report("(cocoa) can't create window");
+            exit(1);
+        }
+        [metalWindow setAcceptsMouseMovedEvents:YES];
+        [metalWindow setTitle:@"QEMUMetal"];
+        [metalWindow setContentView:metalView];
+        [metalWindow makeKeyAndOrderFront:self];
+        [metalWindow center];
+        [metalWindow setDelegate: self];
+ 
         /* Used for displaying pause on the screen */
         pauseLabel = [NSTextField new];
         [pauseLabel setBezeled:YES];
@@ -1240,6 +1263,8 @@ QemuCocoaView *cocoaView;
 
     if (cocoaView)
         [cocoaView release];
+    if (metalView)
+	[metalView release];
     [super dealloc];
 }
 
@@ -1280,11 +1305,13 @@ QemuCocoaView *cocoaView;
 - (void)windowDidChangeScreen:(NSNotification *)notification
 {
     [cocoaView updateUIInfo];
+    [metalView updateUIInfo];
 }
 
 - (void)windowDidResize:(NSNotification *)notification
 {
     [cocoaView updateUIInfo];
+    [metalView updateUIInfo];
 }
 
 /* Called when the user clicks on a window's close button */

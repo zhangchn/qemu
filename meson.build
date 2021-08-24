@@ -180,6 +180,9 @@ iokit = []
 emulator_link_args = []
 nvmm =not_found
 hvf = not_found
+metal = []
+metalkit = []
+
 if targetos == 'windows'
   socket = cc.find_library('ws2_32')
   winmm = cc.find_library('winmm')
@@ -190,6 +193,8 @@ if targetos == 'windows'
                                       include_directories: include_directories('.'))
 elif targetos == 'darwin'
   coref = dependency('appleframeworks', modules: 'CoreFoundation')
+  metal = dependency('appleframeworks', modules: 'Metal')
+  metalkit = dependency('appleframeworks', modules: 'MetalKit')
   iokit = dependency('appleframeworks', modules: 'IOKit', required: false)
 elif targetos == 'sunos'
   socket = [cc.find_library('socket'),
@@ -382,6 +387,7 @@ if not get_option('attr').disabled()
 endif
 
 cocoa = dependency('appleframeworks', modules: 'Cocoa', required: get_option('cocoa'))
+
 if cocoa.found() and get_option('sdl').enabled()
   error('Cocoa and SDL cannot be enabled at the same time')
 endif

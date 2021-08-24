@@ -2,5 +2,9 @@
 #import <Metal/Metal.h>
 
 
-@interface MetalQemuView: MTKView
+@interface QemuMetalView: MTKView
+{
+    
+}
+- (void)updateUIInfo;
 @end
