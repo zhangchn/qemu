@@ -180,8 +180,10 @@ iokit = []
 emulator_link_args = []
 nvmm =not_found
 hvf = not_found
-metal = []
 metalkit = []
+metal = []
+quartzcore = []
+simd = []
 
 if targetos == 'windows'
   socket = cc.find_library('ws2_32')
@@ -195,6 +197,7 @@ elif targetos == 'darwin'
   coref = dependency('appleframeworks', modules: 'CoreFoundation')
   metal = dependency('appleframeworks', modules: 'Metal')
   metalkit = dependency('appleframeworks', modules: 'MetalKit')
+  quartzcore = dependency('appleframeworks', modules: 'QuartzCore')
   iokit = dependency('appleframeworks', modules: 'IOKit', required: false)
 elif targetos == 'sunos'
   socket = [cc.find_library('socket'),

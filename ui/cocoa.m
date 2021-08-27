@@ -25,6 +25,7 @@
 #include "qemu/osdep.h"
 
 #import <Cocoa/Cocoa.h>
+#import <QuartzCore/CAMetalLayer.h>
 #include <crt_externs.h>
 
 #include "qemu-common.h"
@@ -349,9 +350,30 @@ static void handleAnyDeviceErrors(Error * err)
 - (QEMUScreen) gscreen;
 - (void) raiseAllKeys;
 @end
+/*
+@protocol QemuMetalViewDelegate <NSObject>
+
+- (void)drawableResize:(CGSize)size;
+
+- (void)renderToMetalLayer:(nonnull CAMetalLayer *)metalLayer;
+
+@end
+*/
+
+
+@interface QemuMetalView: QemuCocoaView <CALayerDelegate>
+{
+    CAMetalLayer *_metalLayer;
+    BOOL _paused;
+    id<QemuMetalViewDelegate> _delegate;
+}
+- (CAMetalLayer *)metalLayer;
+- (void)setDelegate:(id<QemuMetalViewDelegate>)delegate;
+@end
 
 QemuCocoaView *cocoaView;
 QemuMetalView *metalView;
+QemuMetalRenderer *renderer;
 
 @implementation QemuCocoaView
 - (id)initWithFrame:(NSRect)frameRect
@@ -623,13 +645,11 @@ QemuMetalView *metalView;
     // update windows
 
     CGFloat dh = h - oldh;
-    //NSLog(@"old normal window size: %.1f %.1f", [normalWindow frame].size.width, [normalWindow frame].size.height);
     NSRect f = NSMakeRect(
         [normalWindow frame].origin.x,
         [normalWindow frame].origin.y - dh / currentContentsScale,
         w / currentContentsScale,
         [normalWindow frame].size.height + dh / currentContentsScale);
-    //NSLog(@"normal window size: %.1f, %.1f; oldh: %.1f, h: %.1f", f.size.width, f.size.height, oldh, h);
     if (isFullscreen) {
         [[fullScreenWindow contentView] setFrame:[[NSScreen mainScreen] frame]];
         [normalWindow setFrame:f display:NO animate:NO];
@@ -1157,6 +1177,53 @@ QemuMetalView *metalView;
 @end
 
 
+@implementation QemuMetalView
+- (id)initWithFrame:(NSRect)frameRect
+{
+    COCOA_DEBUG("QemuMetalView: initWithFrame\n");
+    self = [super initWithFrame:frameRect];
+    if (self) {
+        self.wantsLayer = YES;
+        self.layerContentsRedrawPolicy = NSViewLayerContentsRedrawDuringViewResize;
+        
+        _metalLayer = (CAMetalLayer*) self.layer;
+        self.layer.delegate = self;
+    }
+    return self;
+}
+
+- (CALayer *)makeBackingLayer
+{
+    return [CAMetalLayer layer];
+}
+
+- (void)displayLayer:(CALayer *)layer
+{
+    [self renderOnEvent];
+}
+
+- (void)drawLayer:(CALayer *)layer
+        inContext:(CGContextRef)ctx
+{
+    [self renderOnEvent];
+}
+
+
+- (void)drawRect:(CGRect)rect
+{
+    [self renderOnEvent];
+}
+
+- (void)renderOnEvent
+{
+    [_delegate renderToMetalLayer:_metalLayer];
+}
+
+- (CAMetalLayer *)metalLayer { return _metalLayer; }
+
+- (void)setDelegate:(id<QemuMetalViewDelegate>)delegate { _delegate = delegate; }
+@end
+
 
 /*
  ------------------------------------------------------
@@ -1203,7 +1270,12 @@ QemuMetalView *metalView;
         }
 
         metalView = [[QemuMetalView alloc] initWithFrame:NSMakeRect(0.0, 0.0, 640.0, 480.0)];
-        metalView.device = MTLCreateSystemDefaultDevice();
+
+        id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+
+        metalView.metalLayer.device = device;
+        renderer = [[QemuMetalRenderer alloc] initWithMetalDevice:device drawablePixelFormat:metalView.metalLayer.pixelFormat];
+	
 
         // create a window
         normalWindow = [[NSWindow alloc] initWithContentRect:[cocoaView frame]
@@ -1305,13 +1377,14 @@ QemuMetalView *metalView;
 - (void)windowDidChangeScreen:(NSNotification *)notification
 {
     [cocoaView updateUIInfo];
-    [metalView updateUIInfo];
+    // [metalView updateUIInfo];
 }
 
 - (void)windowDidResize:(NSNotification *)notification
 {
     [cocoaView updateUIInfo];
     [metalView updateUIInfo];
+    //[renderer mtkView:metalView drawableSizeWillChange:
 }
 
 /* Called when the user clicks on a window's close button */
