@@ -25,6 +25,7 @@
 #include "qemu/osdep.h"
 
 #import <Cocoa/Cocoa.h>
+#import <QuartzCore/CAMetalLayer.h>
 #include <crt_externs.h>
 
 #include "qemu/help-texts.h"
@@ -334,9 +335,30 @@ static void handleAnyDeviceErrors(Error * err)
 - (QEMUScreen) gscreen;
 - (void) raiseAllKeys;
 @end
+/*
+@protocol QemuMetalViewDelegate <NSObject>
+
+- (void)drawableResize:(CGSize)size;
+
+- (void)renderToMetalLayer:(nonnull CAMetalLayer *)metalLayer;
+
+@end
+*/
+
+
+@interface QemuMetalView: QemuCocoaView <CALayerDelegate>
+{
+    CAMetalLayer *_metalLayer;
+    BOOL _paused;
+    id<QemuMetalViewDelegate> _delegate;
+}
+- (CAMetalLayer *)metalLayer;
+- (void)setDelegate:(id<QemuMetalViewDelegate>)delegate;
+@end
 
 QemuCocoaView *cocoaView;
 QemuMetalView *metalView;
+QemuMetalRenderer *renderer;
 
 static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEventRef cgEvent, void *userInfo)
 {
@@ -1202,6 +1224,53 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 @end
 
 
+@implementation QemuMetalView
+- (id)initWithFrame:(NSRect)frameRect
+{
+    COCOA_DEBUG("QemuMetalView: initWithFrame\n");
+    self = [super initWithFrame:frameRect];
+    if (self) {
+        self.wantsLayer = YES;
+        self.layerContentsRedrawPolicy = NSViewLayerContentsRedrawDuringViewResize;
+        
+        _metalLayer = (CAMetalLayer*) self.layer;
+        self.layer.delegate = self;
+    }
+    return self;
+}
+
+- (CALayer *)makeBackingLayer
+{
+    return [CAMetalLayer layer];
+}
+
+- (void)displayLayer:(CALayer *)layer
+{
+    [self renderOnEvent];
+}
+
+- (void)drawLayer:(CALayer *)layer
+        inContext:(CGContextRef)ctx
+{
+    [self renderOnEvent];
+}
+
+
+- (void)drawRect:(CGRect)rect
+{
+    [self renderOnEvent];
+}
+
+- (void)renderOnEvent
+{
+    [_delegate renderToMetalLayer:_metalLayer];
+}
+
+- (CAMetalLayer *)metalLayer { return _metalLayer; }
+
+- (void)setDelegate:(id<QemuMetalViewDelegate>)delegate { _delegate = delegate; }
+@end
+
 
 /*
  ------------------------------------------------------
@@ -1248,7 +1317,12 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
         }
 
         metalView = [[QemuMetalView alloc] initWithFrame:NSMakeRect(0.0, 0.0, 640.0, 480.0)];
-        metalView.device = MTLCreateSystemDefaultDevice();
+
+        id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+
+        metalView.metalLayer.device = device;
+        renderer = [[QemuMetalRenderer alloc] initWithMetalDevice:device drawablePixelFormat:metalView.metalLayer.pixelFormat];
+	
 
         // create a window
         window = [[NSWindow alloc] initWithContentRect:[cocoaView frame]
@@ -1345,7 +1419,7 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 - (void)windowDidChangeScreen:(NSNotification *)notification
 {
     [cocoaView updateUIInfo];
-    [metalView updateUIInfo];
+    // [metalView updateUIInfo];
 }
 
 - (void)windowDidEnterFullScreen:(NSNotification *)notification

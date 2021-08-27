@@ -31,7 +31,7 @@ if host_os == 'linux'
 endif
 
 system_ss.add(when: cocoa, if_true: files('cocoa.m'))
-system_ss.add(when: metalkit, if_true: [files('metal.m'), metalkit])
+system_ss.add(when: metalkit, if_true: [files('metal.m'), metalkit, metal, quartzcore])
 
 vnc_ss = ss.source_set()
 vnc_ss.add(files(
