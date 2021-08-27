@@ -1235,6 +1235,11 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
         
         _metalLayer = (CAMetalLayer*) self.layer;
         self.layer.delegate = self;
+
+        currentContentsScale = [_metalLayer contentsScale];
+        screen.width = frameRect.size.width * currentContentsScale;
+        screen.height = frameRect.size.height * currentContentsScale;
+
     }
     return self;
 }
@@ -1255,9 +1260,97 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     [self renderOnEvent];
 }
 
-
-- (void)drawRect:(CGRect)rect
+- (void) drawRect:(NSRect) rect
 {
+    COCOA_DEBUG("QemuMetalView: drawRect\n");
+    NSLog(@"QemuMetalView: drawRect: %@", NSStringFromRect(rect));
+
+    // get CoreGraphic context
+
+    // draw screen bitmap directly to Core Graphics context
+    if (pixman_image) {
+        
+        int w = pixman_image_get_width(pixman_image);
+        int h = pixman_image_get_height(pixman_image);
+        int bitsPerPixel = PIXMAN_FORMAT_BPP(pixman_image_get_format(pixman_image));
+        int stride = pixman_image_get_stride(pixman_image);
+        /*
+        CGDataProviderRef dataProviderRef = CGDataProviderCreateWithData(
+            NULL,
+            pixman_image_get_data(pixman_image),
+            stride * h,
+            NULL
+        );
+        CGImageRef imageRef = CGImageCreate(
+            w, //width
+            h, //height
+            DIV_ROUND_UP(bitsPerPixel, 8) * 2, //bitsPerComponent
+            bitsPerPixel, //bitsPerPixel
+            stride, //bytesPerRow
+            CGColorSpaceCreateWithName(kCGColorSpaceSRGB), //colorspace
+            kCGBitmapByteOrder32Little | kCGImageAlphaNoneSkipFirst, //bitmapInfo
+            dataProviderRef, //provider
+            NULL, //decode
+            0, //interpolate
+            kCGRenderingIntentDefault //intent
+        );
+        */
+        // selective drawing code (draws only dirty rectangles) (OS X >= 10.4)
+        const NSRect *rectList;
+        NSInteger rectCount;
+        int i;
+        CGRect clipRect;
+
+        [self getRectsBeingDrawn:&rectList count:&rectCount];
+        uint8_t *bytes = pixman_image_get_data(pixman_image);
+        CGFloat s = _metalLayer.contentsScale;
+        int x, y, ch;
+        for (y = 0; y < h; y++) {
+            for (x = 0; x < w; x ++) {
+                for (ch = 0; ch < 4; ch ++) {
+                    bytes[stride * y + x * bitsPerPixel / 8 + ch] = 0xff;
+
+                }
+            }
+        }
+        for (i = 0; i < rectCount; i++) {
+            MTLRegion region = MTLRegionMake2D(
+                    rectList[i].origin.x * s,
+                    rectList[i].origin.y * s,
+                    rectList[i].size.width * s,
+                    rectList[i].size.height * s
+                    );
+            NSLog(@"region: %@", NSStringFromRect(rectList[i]));
+            [[renderer texture] replaceRegion:region
+                                  mipmapLevel:0
+                                    withBytes:bytes
+                                  bytesPerRow:stride];
+            /*
+            clipRect.origin.x = rectList[i].origin.x / cdx;
+            clipRect.origin.y = (float)h - (rectList[i].origin.y + rectList[i].size.height) / cdy;
+            clipRect.size.width = rectList[i].size.width / cdx;
+            clipRect.size.height = rectList[i].size.height / cdy;
+            clipImageRef = CGImageCreateWithImageInRect(
+                                                        imageRef,
+                                                        clipRect
+                                                        );
+            CGContextDrawImage (viewContextRef, cgrect(rectList[i]), clipImageRef);
+            CGImageRelease (clipImageRef);
+            */
+        }
+        // CGRect cursorDrawRect = [self cursorRect];
+        //
+        if (cursorVisible && cursorImage && NSIntersectsRect(rect, cursorRect)) {
+            /*
+            CGContextDrawImage (viewContextRef, cursorRect, cursorImage);
+            */
+        }
+        /*
+        CGImageRelease (imageRef);
+        CGDataProviderRelease(dataProviderRef);
+        */
+    }
+
     [self renderOnEvent];
 }
 
@@ -1266,14 +1359,111 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     [_delegate renderToMetalLayer:_metalLayer];
 }
 
+- (void) updateUIInfo
+{
+    NSSize frameSize;
+    QemuUIInfo info;
+
+    if (!qemu_console_is_graphic(dcl.con)) {
+        return;
+    }
+
+    currentContentsScale = _metalLayer.contentsScale;
+    if ([self window]) {
+        NSDictionary *description = [[[self window] screen] deviceDescription];
+        CGDirectDisplayID display = [[description objectForKey:@"NSScreenNumber"] unsignedIntValue];
+        NSSize screenSize = [[[self window] screen] frame].size;
+        CGSize screenPhysicalSize = CGDisplayScreenSize(display);
+
+        frameSize = isFullscreen ? screenSize : [self frame].size;
+        info.width_mm = frameSize.width / screenSize.width / currentContentsScale * screenPhysicalSize.width;
+        info.height_mm = frameSize.height / screenSize.height / currentContentsScale * screenPhysicalSize.height;
+    } else {
+        frameSize = [self frame].size;
+        info.width_mm = 0;
+        info.height_mm = 0;
+    }
+
+
+    info.xoff = 0;
+    info.yoff = 0;
+    info.width = frameSize.width * currentContentsScale;
+    info.height = frameSize.height * currentContentsScale;
+
+    dpy_set_ui_info(dcl.con, &info);
+}
+
+
 - (void)viewDidMoveToWindow
 {
     [super viewDidMoveToWindow];
     
+    NSLog(@"metalView: viewDidMoveToWindow");
     CGSize defaultDrawableSize = self.bounds.size;
     defaultDrawableSize.width *= self.layer.contentsScale;
     defaultDrawableSize.height *= self.layer.contentsScale;
+
     [_delegate drawableResize:defaultDrawableSize];    
+}
+
+- (void) switchSurface:(pixman_image_t *)image
+{
+    COCOA_DEBUG("QemuMetalView: switchSurface\n");
+
+    int w = pixman_image_get_width(image);
+    int h = pixman_image_get_height(image);
+    NSLog(@"QemuMetalView: switchSurface: %d x %d", w, h);
+    /* cdx == 0 means this is our very first surface, in which case we need
+     * to recalculate the content dimensions even if it happens to be the size
+     * of the initial empty window.
+     */
+    bool isResize = (w != screen.width || h != screen.height || cdx == 0.0);
+
+    int oldh = screen.height;
+    if (isResize) {
+        // Resize before we trigger the redraw, or we'll redraw at the wrong size
+        COCOA_DEBUG("switchSurface: new size %d x %d\n", w, h);
+        screen.width = w;
+        screen.height = h;
+        [self setContentDimensions];
+        [self setFrame:NSMakeRect(cx, cy, cw, ch)];
+    }
+
+    // update screenBuffer
+    if (pixman_image) {
+        pixman_image_unref(pixman_image);
+    }
+
+    pixman_image = image;
+
+    // update windows
+
+    CGFloat dh = h - oldh;
+    NSLog(@"metalView: oldh: %d newh: %d; scale: %.1f", oldh, h, currentContentsScale);
+    NSRect f = NSMakeRect(
+        [metalWindow frame].origin.x,
+        [metalWindow frame].origin.y - dh / currentContentsScale,
+        w / currentContentsScale,
+        [metalWindow frame].size.height + dh / currentContentsScale);
+    if (isFullscreen) {
+        //[[fullScreenWindow contentView] setFrame:[[NSScreen mainScreen] frame]];
+        [metalWindow setFrame:f display:NO animate:NO];
+    } else {
+        if (qemu_name)
+            [metalWindow setTitle:[NSString stringWithFormat:@"QEMU %s", qemu_name]];
+        [metalWindow setFrame:f display:YES animate:NO];
+    }
+
+    CGSize drawableSize = CGSizeMake(w, h);
+    [_delegate drawableResize:drawableSize];
+
+    [self setNeedsDisplayInRect:self.bounds];
+    /*
+     * XXX: avoid this temporarily
+    if (isResize) {
+        [metalWindow center];
+    }
+    */
 }
 
 - (CAMetalLayer *)metalLayer { return _metalLayer; }
@@ -1326,7 +1516,7 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
             exit(1);
         }
 
-        metalView = [[QemuMetalView alloc] initWithFrame:NSMakeRect(0.0, 0.0, 640.0, 480.0)];
+        metalView = [[QemuMetalView alloc] initWithFrame:NSMakeRect(0.0, 0.0, 320.0, 240.0)];
 
         id<MTLDevice> device = MTLCreateSystemDefaultDevice();
 
@@ -2122,7 +2312,7 @@ static void cocoa_update(DisplayChangeListener *dcl,
     COCOA_DEBUG("qemu_cocoa: cocoa_update\n");
 
     dispatch_async(dispatch_get_main_queue(), ^{
-        NSRect rect;
+        NSRect rect, metalRect;
 	/*
         if ([cocoaView cdx] == 1.0) {
             rect = NSMakeRect(x, [cocoaView gscreen].height - y - h, w, h);
@@ -2137,6 +2327,15 @@ static void cocoa_update(DisplayChangeListener *dcl,
         }
 	*/
         [cocoaView setNeedsDisplayInRect:rect];
+        metalRect = NSMakeRect(
+                x * [metalView cdx],
+                ([metalView gscreen].height - y - h) * [metalView cdy],
+                w * [metalView cdx],
+                h * [metalView cdy]);
+
+
+        [metalView setNeedsDisplayInRect:metalRect];
+
     });
 }
 
@@ -2152,9 +2351,12 @@ static void cocoa_switch(DisplayChangeListener *dcl,
     // not disappear from under our feet; the switchSurface method will
     // deref the old image when it is done with it.
     pixman_image_ref(image);
+    // XXX: double retain for two views
+    pixman_image_ref(image);
 
     dispatch_async(dispatch_get_main_queue(), ^{
         [cocoaView switchSurface:image];
+        [metalView switchSurface:image];
     });
 }
 
