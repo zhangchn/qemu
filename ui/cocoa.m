@@ -1219,6 +1219,16 @@ QemuMetalRenderer *renderer;
     [_delegate renderToMetalLayer:_metalLayer];
 }
 
+- (void)viewDidMoveToWindow
+{
+    [super viewDidMoveToWindow];
+    
+    CGSize defaultDrawableSize = self.bounds.size;
+    defaultDrawableSize.width *= self.layer.contentsScale;
+    defaultDrawableSize.height *= self.layer.contentsScale;
+    [_delegate drawableResize:defaultDrawableSize];    
+}
+
 - (CAMetalLayer *)metalLayer { return _metalLayer; }
 
 - (void)setDelegate:(id<QemuMetalViewDelegate>)delegate { _delegate = delegate; }
@@ -1275,6 +1285,7 @@ QemuMetalRenderer *renderer;
 
         metalView.metalLayer.device = device;
         renderer = [[QemuMetalRenderer alloc] initWithMetalDevice:device drawablePixelFormat:metalView.metalLayer.pixelFormat];
+        metalView.delegate = renderer;
 	
 
         // create a window

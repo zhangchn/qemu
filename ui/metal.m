@@ -14,13 +14,6 @@
     
 }
 
-- (void)setUpTexture 
-{
-    MTLTextureDescriptor *textureDescriptor = [[MTLTextureDescriptor alloc] init];
-    textureDescriptor.pixelFormat = MTLPixelFormatBGRA8Unorm;
-    textureDescriptor.width = _viewportSize.x;
-    textureDescriptor.height = _viewportSize.y;
-}
 
 - (id)initWithMetalDevice:(nonnull id<MTLDevice>)device
       drawablePixelFormat:(MTLPixelFormat)drawabklePixelFormat
@@ -37,12 +30,6 @@
         _drawableRenderDescriptor.colorAttachments[0].loadAction = MTLLoadActionClear;
         _drawableRenderDescriptor.colorAttachments[0].storeAction = MTLStoreActionStore;
         _drawableRenderDescriptor.colorAttachments[0].clearColor = MTLClearColorMake(0, 1, 1, 1);
-
-#if CREATE_DEPTH_BUFFER
-        _drawableRenderDescriptor.depthAttachment.loadAction = MTLLoadActionClear;
-        _drawableRenderDescriptor.depthAttachment.storeAction = MTLStoreActionDontCare;
-        _drawableRenderDescriptor.depthAttachment.clearDepth = 1.0;
-#endif
 
         {
             NSString *source = @"#include <metal_stdlib>\n\
@@ -143,10 +130,6 @@ fragmentShader(RasterizerData in [[stage_in]])\
                 pipelineDescriptor.fragmentFunction                = fragmentProgram;
                 pipelineDescriptor.colorAttachments[0].pixelFormat = drawabklePixelFormat;
 
-#if CREATE_DEPTH_BUFFER
-                pipelineDescriptor.depthAttachmentPixelFormat      = AAPLDepthPixelFormat;
-#endif
-
                 NSError *pipelineError;
                 _pipelineState = [_device newRenderPipelineStateWithDescriptor:pipelineDescriptor
                                                                          error:&pipelineError];
@@ -210,13 +193,10 @@ fragmentShader(RasterizerData in [[stage_in]])\
 }
 
 
-- (void)mtkView:(nonnull MTKView *)view drawableSizeWillChange:(CGSize)size
+- (void)drawableResize:(CGSize)drawableSize
 {
-}
-
-- (void)drawInMTKView:(nonnull MTKView *)view
-{
+    _viewportSize.x = drawableSize.width;
+    _viewportSize.y = drawableSize.height;
 
 }
-
 @end
