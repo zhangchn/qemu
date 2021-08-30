@@ -63,14 +63,12 @@ struct RasterizerData\n\
 \
 vertex RasterizerData\n\
 vertexShader(uint vertexID [[ vertex_id ]],\n\
-             constant AAPLVertex *vertexArray [[ buffer(AAPLVertexInputIndexVertices) ]],\n\
-             constant vector_uint2 *viewportSizePointer  [[ buffer(AAPLVertexInputIndexViewportSize) ]])\n\
+             constant AAPLVertex *vertexArray [[ buffer(AAPLVertexInputIndexVertices) ]]\n\
+             )\n\
 {\n\
     RasterizerData out;\n\
-    float2 pixelSpacePosition = vertexArray[vertexID].position.xy;\n\
-    float2 viewportSize = float2(*viewportSizePointer);\n\
     out.position = vector_float4(0.0, 0.0, 0.0, 1.0);\n\
-    out.position.xy = pixelSpacePosition / (viewportSize / 2.0);\n\
+    out.position.xy = vertexArray[vertexID].position.xy;\n\
     out.textureCoordinate = vertexArray[vertexID].textureCoordinate;\n\
     return out;\n\
 }\n\
@@ -82,9 +80,6 @@ samplingShader(RasterizerData in [[stage_in]],\n\
                                       min_filter::linear);\n\
     const half4 colorSample = colorTexture.sample(textureSampler, in.textureCoordinate);\n\
     float4 x = float4(colorSample);\n\
-    //x.x = 1.0;\n\
-    //x.y = 0.5;\n\
-    //x.w = 0.1;\n\
     return x; // float4(colorSample);\n\
 }\n\
 ";
@@ -116,13 +111,13 @@ samplingShader(RasterizerData in [[stage_in]],\n\
                 static const AAPLVertex quadVertices[] =
                 {
                     // Pixel positions, texture coordinates
-                    { {  200,  -200 },  { 1.f, 1.f } },
-                    { { -200,  -200 },  { 0.f, 1.f } },
-                    { { -200,   200 },  { 0.f, 0.f } },
+                    { {  1.f,  -1.f },  { 1.f, 1.f } },
+                    { { -1.f,  -1.f },  { 0.f, 1.f } },
+                    { { -1.f,   1.f },  { 0.f, 0.f } },
 
-                    { {  200,  -200 },  { 1.f, 1.f } },
-                    { { -200,   200 },  { 0.f, 0.f } },
-                    { {  200,   200 },  { 1.f, 0.f } },
+                    { {  1.f,  -1.f },  { 1.f, 1.f } },
+                    { { -1.f,   1.f },  { 0.f, 0.f } },
+                    { {  1.f,   1.f },  { 1.f, 0.f } },
                 };
 
                 // Create a vertex buffer, and initialize it with the vertex data.
@@ -178,7 +173,7 @@ samplingShader(RasterizerData in [[stage_in]],\n\
 - (void)renderToMetalLayer:(nonnull CAMetalLayer*)metalLayer
 {
 
-    NSLog(@"renderToMetalLayer");
+    // NSLog(@"renderToMetalLayer");
     // Create a new command buffer for each render pass to the current drawable.
     id <MTLCommandBuffer> commandBuffer = [_commandQueue commandBuffer];
 
@@ -189,8 +184,8 @@ samplingShader(RasterizerData in [[stage_in]],\n\
     {
         return;
     }
-    NSLog(@"_viewportSize: %d, %d", _viewportSize.x, _viewportSize.y);
-    NSLog(@"_numVertices: %d", _numVertices);
+    // NSLog(@"_viewportSize: %d, %d", _viewportSize.x, _viewportSize.y);
+    // NSLog(@"_numVertices: %d", _numVertices);
 
     _drawableRenderDescriptor.colorAttachments[0].texture = currentDrawable.texture;
     
@@ -227,47 +222,9 @@ samplingShader(RasterizerData in [[stage_in]],\n\
     NSLog(@"drawableResize: new size: %@", NSStringFromSize(drawableSize));
     if (drawableSize.width != _viewportSize.x || drawableSize.height != _viewportSize.y) {
         NSLog(@"drawableResize: prepare texture");
-        //[_texture release];
         [self prepareTexture:drawableSize];
     }
     _viewportSize.x = drawableSize.width;
     _viewportSize.y = drawableSize.height;
-
-    /*
-    AAPLVertex *quadVertices = _vertices.contents;
-    if (quadVertices) {
-        quadVertices[0].position.x = _viewportSize.x / 2;
-        quadVertices[0].position.y = _viewportSize.y / -2;
-        quadVertices[1].position.x = _viewportSize.x / -2;
-        quadVertices[1].position.y = _viewportSize.y / -2;
-        quadVertices[2].position.x = _viewportSize.x / -2;
-        quadVertices[2].position.y = _viewportSize.y / 2;
-        quadVertices[3].position.x = _viewportSize.x / 2;
-        quadVertices[3].position.y = _viewportSize.y / -2;
-        quadVertices[4].position.x = _viewportSize.x / -2;
-        quadVertices[4].position.y = _viewportSize.y / 2;
-        quadVertices[5].position.x = _viewportSize.x / 2;
-        quadVertices[5].position.y = _viewportSize.y / 2;
-    }
-    */
-     /*
-    {
-        // Pixel positions, texture coordinates
-        { {  _viewportSize.x / 2 ,  -1 * _viewportSize.y / 2 },  { 1.f, 1.f } },
-        { {  -1 * _viewportSize.x / 2 ,  -1 * _viewportSize.y / 2 },  { 0.f, 1.f } },
-        { {  -1 * _viewportSize.x / 2 ,  _viewportSize.y / 2 },  { 0.f, 0.f } },
-
-        { {   _viewportSize.x / 2 ,  -1 * _viewportSize.y / 2},  { 1.f, 1.f } },
-        { {  -1 * _viewportSize.x / 2 ,  _viewportSize.y / 2 },  { 0.f, 0.f } },
-        { {   _viewportSize.x / 2 ,  _viewportSize.y / 2  },  { 1.f, 0.f } },
-    };
-
-    // Create a vertex buffer, and initialize it with the vertex data.
-    _vertices = [_device newBufferWithBytes:quadVertices
-                                     length:sizeof(quadVertices)
-                                    options:MTLResourceStorageModeShared];
-
-                                    */
-
 }
 @end
