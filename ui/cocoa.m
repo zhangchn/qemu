@@ -354,6 +354,7 @@ static void handleAnyDeviceErrors(Error * err)
 }
 - (CAMetalLayer *)metalLayer;
 - (void)setDelegate:(id<QemuMetalViewDelegate>)delegate;
+- (void)drawMetalRegion:(MTLRegion)region;
 @end
 
 QemuCocoaView *cocoaView;
@@ -1234,6 +1235,7 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
         self.layerContentsRedrawPolicy = NSViewLayerContentsRedrawDuringViewResize;
         
         _metalLayer = (CAMetalLayer*) self.layer;
+        _metalLayer.contentsScale = currentContentsScale;
         self.layer.delegate = self;
 
         currentContentsScale = [_metalLayer contentsScale];
@@ -1260,103 +1262,63 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     [self renderOnEvent];
 }
 
-- (void) drawRect:(NSRect) rect
+- (void) drawMetalRegion:(MTLRegion) region
 {
     COCOA_DEBUG("QemuMetalView: drawRect\n");
-    NSLog(@"QemuMetalView: drawRect: %@", NSStringFromRect(rect));
 
-    // get CoreGraphic context
-
-    // draw screen bitmap directly to Core Graphics context
+    // draw region by replacing bytes to texture
     if (pixman_image) {
         
-        int w = pixman_image_get_width(pixman_image);
-        int h = pixman_image_get_height(pixman_image);
+        // int w = pixman_image_get_width(pixman_image);
+        // int h = pixman_image_get_height(pixman_image);
         int bitsPerPixel = PIXMAN_FORMAT_BPP(pixman_image_get_format(pixman_image));
         int stride = pixman_image_get_stride(pixman_image);
-        /*
-        CGDataProviderRef dataProviderRef = CGDataProviderCreateWithData(
-            NULL,
-            pixman_image_get_data(pixman_image),
-            stride * h,
-            NULL
-        );
-        CGImageRef imageRef = CGImageCreate(
-            w, //width
-            h, //height
-            DIV_ROUND_UP(bitsPerPixel, 8) * 2, //bitsPerComponent
-            bitsPerPixel, //bitsPerPixel
-            stride, //bytesPerRow
-            CGColorSpaceCreateWithName(kCGColorSpaceSRGB), //colorspace
-            kCGBitmapByteOrder32Little | kCGImageAlphaNoneSkipFirst, //bitmapInfo
-            dataProviderRef, //provider
-            NULL, //decode
-            0, //interpolate
-            kCGRenderingIntentDefault //intent
-        );
-        */
-        // selective drawing code (draws only dirty rectangles) (OS X >= 10.4)
-        const NSRect *rectList;
-        NSInteger rectCount;
-        int i;
-        CGRect clipRect;
-
-        [self getRectsBeingDrawn:&rectList count:&rectCount];
-        uint8_t *bytes = pixman_image_get_data(pixman_image);
-        CGFloat s = _metalLayer.contentsScale;
-        int x, y, ch;
-        for (y = 0; y < h; y++) {
-            for (x = 0; x < w; x ++) {
-                for (ch = 0; ch < 4; ch ++) {
-                    bytes[stride * y + x * bitsPerPixel / 8 + ch] = 0xff;
-
-                }
-            }
-        }
-        for (i = 0; i < rectCount; i++) {
-            MTLRegion region = MTLRegionMake2D(
-                    rectList[i].origin.x * s,
-                    rectList[i].origin.y * s,
-                    rectList[i].size.width * s,
-                    rectList[i].size.height * s
-                    );
-            NSLog(@"region: %@", NSStringFromRect(rectList[i]));
-            [[renderer texture] replaceRegion:region
-                                  mipmapLevel:0
-                                    withBytes:bytes
-                                  bytesPerRow:stride];
-            /*
-            clipRect.origin.x = rectList[i].origin.x / cdx;
-            clipRect.origin.y = (float)h - (rectList[i].origin.y + rectList[i].size.height) / cdy;
-            clipRect.size.width = rectList[i].size.width / cdx;
-            clipRect.size.height = rectList[i].size.height / cdy;
-            clipImageRef = CGImageCreateWithImageInRect(
-                                                        imageRef,
-                                                        clipRect
-                                                        );
-            CGContextDrawImage (viewContextRef, cgrect(rectList[i]), clipImageRef);
-            CGImageRelease (clipImageRef);
-            */
-        }
-        // CGRect cursorDrawRect = [self cursorRect];
-        //
-        if (cursorVisible && cursorImage && NSIntersectsRect(rect, cursorRect)) {
+        int offset = region.origin.x * bitsPerPixel / 8 + stride * region.origin.y;
+        void *bytes = pixman_image_get_data(pixman_image);
+        // NSLog(@"region: %@", NSStringFromRect(rect));
+        [[renderer texture] replaceRegion:region
+                              mipmapLevel:0
+                                withBytes:bytes + offset
+                              bytesPerRow:stride];
+            
+        // if (cursorVisible && cursorImage && NSIntersectsRect(rect, cursorRect)) {
             /*
             CGContextDrawImage (viewContextRef, cursorRect, cursorImage);
             */
-        }
+        //}
         /*
         CGImageRelease (imageRef);
         CGDataProviderRelease(dataProviderRef);
         */
+        [self renderOnEvent];
     }
-
-    [self renderOnEvent];
 }
 
 - (void)renderOnEvent
 {
     [_delegate renderToMetalLayer:_metalLayer];
+}
+
+- (void)resizeDrawable:(CGFloat)scaleFactor
+{
+    CGSize newSize = self.bounds.size;
+    newSize.width *= scaleFactor;
+    newSize.height *= scaleFactor;
+
+    if(newSize.width <= 0 || newSize.width <= 0)
+    {
+        return;
+    }
+
+    if(newSize.width == _metalLayer.drawableSize.width &&
+       newSize.height == _metalLayer.drawableSize.height)
+    {
+        return;
+    }
+
+    _metalLayer.drawableSize = newSize;
+
+    [_delegate drawableResize:newSize];
 }
 
 - (void) updateUIInfo
@@ -1399,11 +1361,30 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     [super viewDidMoveToWindow];
     
     NSLog(@"metalView: viewDidMoveToWindow");
-    CGSize defaultDrawableSize = self.bounds.size;
-    defaultDrawableSize.width *= self.layer.contentsScale;
-    defaultDrawableSize.height *= self.layer.contentsScale;
+    //CGSize defaultDrawableSize = self.bounds.size;
+    //defaultDrawableSize.width *= self.layer.contentsScale;
+    //defaultDrawableSize.height *= self.layer.contentsScale;
 
-    [_delegate drawableResize:defaultDrawableSize];    
+    //[_delegate drawableResize:defaultDrawableSize];
+    [self resizeDrawable:self.window.screen.backingScaleFactor];
+}
+
+- (void)viewDidChangeBackingProperties
+{
+    [super viewDidChangeBackingProperties];
+    [self resizeDrawable:self.window.screen.backingScaleFactor];
+}
+
+- (void)setFrameSize:(NSSize)size
+{
+    [super setFrameSize:size];
+    [self resizeDrawable:self.window.screen.backingScaleFactor];
+}
+
+- (void)setBoundsSize:(NSSize)size
+{
+    [super setBoundsSize:size];
+    [self resizeDrawable:self.window.screen.backingScaleFactor];
 }
 
 - (void) switchSurface:(pixman_image_t *)image
@@ -2312,7 +2293,7 @@ static void cocoa_update(DisplayChangeListener *dcl,
     COCOA_DEBUG("qemu_cocoa: cocoa_update\n");
 
     dispatch_async(dispatch_get_main_queue(), ^{
-        NSRect rect, metalRect;
+        NSRect rect;
 	/*
         if ([cocoaView cdx] == 1.0) {
             rect = NSMakeRect(x, [cocoaView gscreen].height - y - h, w, h);
@@ -2327,15 +2308,7 @@ static void cocoa_update(DisplayChangeListener *dcl,
         }
 	*/
         [cocoaView setNeedsDisplayInRect:rect];
-        metalRect = NSMakeRect(
-                x * [metalView cdx],
-                ([metalView gscreen].height - y - h) * [metalView cdy],
-                w * [metalView cdx],
-                h * [metalView cdy]);
-
-
-        [metalView setNeedsDisplayInRect:metalRect];
-
+	[metalView drawMetalRegion:MTLRegionMake2D(x, y, w, h)];
     });
 }
 
