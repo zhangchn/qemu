@@ -353,8 +353,8 @@ static void handleAnyDeviceErrors(Error * err)
     id<QemuMetalViewDelegate> _delegate;
 }
 - (CAMetalLayer *)metalLayer;
-- (void)setDelegate:(id<QemuMetalViewDelegate>)delegate;
-- (void)drawMetalRegion:(MTLRegion)region;
+- (void) setDelegate:(id<QemuMetalViewDelegate>)delegate;
+- (void) updateMetalAtX:(int)x y:(int)y width:(int)width height:(int)height;
 @end
 
 QemuCocoaView *cocoaView;
@@ -1262,24 +1262,22 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     [self renderOnEvent];
 }
 
-- (void) drawMetalRegion:(MTLRegion) region
+- (void) updateMetalAtX:(int)x y:(int)y width:(int)w height:(int)h
 {
-    COCOA_DEBUG("QemuMetalView: drawRect\n");
+    COCOA_DEBUG("QemuMetalView: updateMetal\n");
 
     // draw region by replacing bytes to texture
     if (pixman_image) {
-        
-        // int w = pixman_image_get_width(pixman_image);
-        // int h = pixman_image_get_height(pixman_image);
         int bitsPerPixel = PIXMAN_FORMAT_BPP(pixman_image_get_format(pixman_image));
         int stride = pixman_image_get_stride(pixman_image);
-        int offset = region.origin.x * bitsPerPixel / 8 + stride * region.origin.y;
-        void *bytes = pixman_image_get_data(pixman_image);
-        // NSLog(@"region: %@", NSStringFromRect(rect));
-        [[renderer texture] replaceRegion:region
-                              mipmapLevel:0
-                                withBytes:bytes + offset
-                              bytesPerRow:stride];
+        int offset = x * bitsPerPixel / 8 + stride * y;
+        const uint8_t *bytes = pixman_image_get_data(pixman_image) + offset;
+        [renderer updateDisplayTextureWithBuffer:bytes
+                                               x:x
+                                               y:y
+                                           width:width
+                                          height:h
+                                          stride:stride];
             
         // if (cursorVisible && cursorImage && NSIntersectsRect(rect, cursorRect)) {
             /*
@@ -2308,7 +2306,8 @@ static void cocoa_update(DisplayChangeListener *dcl,
         }
 	*/
         [cocoaView setNeedsDisplayInRect:rect];
-	[metalView drawMetalRegion:MTLRegionMake2D(x, y, w, h)];
+	//[metalView updateMetalRect:MTLRegionMake2D(x, y, w, h)];
+    [metalView updateMetalAtX:x y:y width:w height:h];
     });
 }
 
@@ -2387,6 +2386,7 @@ static void cocoa_cursor_define(DisplayChangeListener *dcl, QEMUCursor *c)
         CGRect rect = [cocoaView cursorRect];
         rect.size = CGSizeMake(width / contentsScale, height / contentsScale);
         [cocoaView setCursorRect:rect];
+        [renderer defineCursorTexture:c->data width:c->width, height:c->height stride:stride];
     });
     [pool release];
 }
@@ -2408,6 +2408,9 @@ static void cocoa_mouse_set(DisplayChangeListener *dcl,
         [cocoaView setCursorRect:rect];
         [cocoaView setCursorVisible:visible ? YES : NO];
         // Mark new cursor rect as dirty
+        [renderer setCursorVisible:visible x:x y:y];
+        [metalView renderOnEvent];
+
         [cocoaView setNeedsDisplayInRect:rect];
     });
     [pool release];
