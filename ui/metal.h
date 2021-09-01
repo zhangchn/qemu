@@ -11,14 +11,23 @@
 
 
 @interface QemuMetalRenderer: NSObject<QemuMetalViewDelegate>
-- (id<MTLTexture>)prepareTexture:(CGSize)size;
 - (id)initWithMetalDevice:(id<MTLDevice>)device
       drawablePixelFormat:(MTLPixelFormat)drawabklePixelFormat;
 
+- (void)updateDisplayTexture:(const uint8_t*)srcBytes
+                           x:(int)x
+                           y:(int)y
+                       width:(int)width
+                      height:(int)height
+                      stride:(int)stride;
+- (void)defineCursorTexture:(const uint8_t*)srcBytes
+                      width:(int)width
+                     height:(int)height
+                     stride:(int)stride;       
+- (void)setCursorVisible:(BOOL)visibility X:(int)x y:(int)y;
 - (void)renderToMetalLayer:(CAMetalLayer*)metalLayer;
 
 - (void)drawableResize:(CGSize)drawableSize;
-- (id<MTLTexture>) texture;
 @end
 
 typedef enum AAPLVertexInputIndex
@@ -41,8 +50,8 @@ typedef enum AAPLTextureIndex
 
 typedef struct
 {
-    // Positions in pixel space. A value of 100 indicates 100 pixels from the origin/center.
-    vector_float2 position;
+    // Positions in pixel space with depth. A value of 100 indicates 100 pixels from the origin/center.
+    vector_float3 position;
 
     // 2D texture coordinate
     vector_float2 textureCoordinate;
