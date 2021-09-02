@@ -312,9 +312,9 @@ typedef struct
                                height:(int)height
                                stride:(int)stride
 {
-    NSLog(@"defineCursorTexture: %d %d", width, height);
+    //NSLog(@"defineCursorTexture: %d %d", width, height);
     if (width != _cursorRect.z || height != _cursorRect.w || !_cursorTexture) {
-        NSLog(@"prepare cursor texture");
+        //NSLog(@"prepare cursor texture");
         MTLTextureDescriptor *textureDescriptor = [[MTLTextureDescriptor alloc] init];
         textureDescriptor.pixelFormat = MTLPixelFormatBGRA8Unorm;
         textureDescriptor.width = width;
