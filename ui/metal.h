@@ -20,7 +20,7 @@
                                  width:(int)width
                                 height:(int)height
                                 stride:(int)stride;
-- (void)defineCursorTextureWithBuffer:(const uint8_t*)srcBytes
+- (void)defineCursorTextureWithBuffer:(const void *)srcBytes
                                 width:(int)width
                                height:(int)height
                                stride:(int)stride;       

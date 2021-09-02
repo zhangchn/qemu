@@ -14,7 +14,7 @@ typedef enum QEMUVertexInputIndex
 typedef enum QEMUTextureIndex
 {
     QEMUTextureIndexBaseColor = 0,
-    QEMUTextureIndexCursorColor = 0,
+    QEMUTextureIndexCursorColor = 1,
 } QEMUTextureIndex;
 
 //  This structure defines the layout of each vertex in the array of vertices set as an input to the
@@ -40,6 +40,7 @@ typedef struct
     id<MTLTexture> _depthTarget;
     id<MTLTexture> _texture;
     id<MTLTexture> _cursorTexture;
+    id<MTLTexture> _cursorTexturePlaceholder;
     id<MTLBuffer> _vertices;
     NSUInteger _numVertices;
     vector_uint2 _viewportSize;
@@ -64,8 +65,9 @@ typedef struct
         _viewportSize.y = 480;
         _cursorRect.x = 0;
         _cursorRect.y = 0;
-        _cursorRect.z = 64;
-        _cursorRect.w = 64;
+        _cursorRect.z = 1;
+        _cursorRect.w = 1;
+        _cursorVisible = NO;
 
         _drawableRenderDescriptor = [MTLRenderPassDescriptor new];
         _drawableRenderDescriptor.colorAttachments[0].loadAction = MTLLoadActionClear;
@@ -81,63 +83,13 @@ typedef struct
         depthDescriptor.depthWriteEnabled = YES;
         _depthState = [_device newDepthStencilStateWithDescriptor:depthDescriptor];
         {
-            NSString *source = @"#include <metal_stdlib>\n\
-#include <simd/simd.h>\n\
-using namespace metal;\n\
-typedef enum QEMUVertexInputIndex\n\
-{\
-    QEMUVertexInputIndexVertices = 0,\
-    QEMUVertexInputIndexViewportSize = 1,\
-} QEMUVertexInputIndex;\n\
-typedef enum QEMUTextureIndex\n\
-{\n\
-    QEMUTextureIndexBaseColor = 0,\n\
-    QEMUTextureIndexCursorColor = 1,\n\
-} QEMUTextureIndex;\n\
-typedef struct\n\
-{\
-    vector_float3 position;\
-    vector_float2 textureCoordinate;\
-} QEMUVertex;\n\
-struct RasterizerData\n\
-{\n\
-    float4 position [[position]];\n\
-    float2 textureCoordinate;\n\
-};\n\
-\n\
-vertex RasterizerData\n\
-vertexShader(uint vertexID [[ vertex_id ]],\n\
-             constant QEMUVertex *vertexArray [[ buffer(QEMUVertexInputIndexVertices) ]])\n\
-{\n\
-    RasterizerData out;\n\
-    out.position = vector_float4(0.0, 0.0, 0.0, 1.0);\n\
-    out.position.xyz = vertexArray[vertexID].position.xyz;\n\
-    out.textureCoordinate = vertexArray[vertexID].textureCoordinate;\n\
-    return out;\n\
-}\n\
-\n\
-fragment float4 \n\
-samplingShader(RasterizerData in [[stage_in]],\n\
-               texture2d<half> colorTexture [[ texture(QEMUTextureIndexBaseColor) ]],\n\
-               texture2d<half> cursorTexture [[ texture(QEMUTextureIndexCursorColor) ]])\n\
-{\n\
-    constexpr sampler textureSampler (mag_filter::linear,\n\
-                                      min_filter::linear);\n\
-    constexpr sampler cursorTextureSampler (mag_filter::linear,\n\
-                                            min_filter::linear);\n\
-    half4 colorSample;\n\
-    colorSample = colorTexture.sample(textureSampler, in.textureCoordinate);\n\
-    /* if (in.position.z > 0.5) {\n\
-        colorSample = colorTexture.sample(textureSampler, in.textureCoordinate);\n\
-        colorSample.a = 1.0;\n\
-    } else {\n\
-        colorSample = cursorTexture.sample(cursorTextureSampler, in.textureCoordinate);\n\
-    } */\n\
-    // const half4 colorSample = in.position.z > 0.5 ? colorTexture.sample(textureSampler, in.textureCoordinate) : cursorTexture.sample(cursorTextureSampler, in.textureCoordinate);\n\
-    return float4(colorSample);\n\
-}\n\
-";
-            NSLog(@"source: \n%@", source);
+            
+            NSError *sourceErr;
+            NSString *source = [NSString stringWithContentsOfFile:@"/tmp/1.metal"
+                                                         encoding:NSUTF8StringEncoding
+                                                            error:&sourceErr];
+            
+            if (sourceErr) { NSLog(@"error: %@", sourceErr);} else {NSLog(@"source: \n%@", source);}
             void *placeholder = malloc(_viewportSize.x * _viewportSize.y * 4);
             [_device newLibraryWithSource:source
                                   options:nil 
@@ -180,6 +132,7 @@ samplingShader(RasterizerData in [[stage_in]],\n\
                     { {  1.f,  -1.f,  0.9f },  { 1.f, 1.f } },
                     { { -1.f,   1.f,  0.9f },  { 0.f, 0.f } },
                     { {  1.f,   1.f,  0.9f },  { 1.f, 0.f } },
+                    
                     // cursor vertex positions, texture coordinates
                     { {  -0.8, 0.7333333, 0.1f },  { 1.f, 1.f } },
                     { {  -1.f, 0.7333333, 0.1f },  { 0.f, 1.f } },
@@ -206,10 +159,24 @@ samplingShader(RasterizerData in [[stage_in]],\n\
                               withBytes:placeholder
                             bytesPerRow:_viewportSize.x * 4];
 
+                // cursor placeholder:
+                MTLTextureDescriptor *textureDescriptor = [[MTLTextureDescriptor alloc] init];
+                textureDescriptor.pixelFormat = MTLPixelFormatBGRA8Unorm;
+                textureDescriptor.width = 1;
+                textureDescriptor.height = 1;
+                _cursorTexturePlaceholder = [_device newTextureWithDescriptor:textureDescriptor];
+                [textureDescriptor release];
+                uint8_t cursorPlaceholderBytes[] = {0, 0, 0, 0};
+                [_cursorTexturePlaceholder  replaceRegion:MTLRegionMake2D(0, 0, 1, 1)
+                                              mipmapLevel:0
+                                                withBytes:cursorPlaceholderBytes
+                                              bytesPerRow:4];
+                /*
                 [self defineCursorTextureWithBuffer:placeholder 
                                               width:_cursorRect.z 
                                              height:_cursorRect.w 
                                              stride:_cursorRect.z * 4];
+                                             */
                 // Create a pipeline state descriptor to create a compiled pipeline state object
                 MTLRenderPipelineDescriptor *pipelineDescriptor = [[MTLRenderPipelineDescriptor alloc] init];
 
@@ -217,13 +184,11 @@ samplingShader(RasterizerData in [[stage_in]],\n\
                 pipelineDescriptor.vertexFunction                  = vertexProgram;
                 pipelineDescriptor.fragmentFunction                = fragmentProgram;
                 pipelineDescriptor.colorAttachments[0].pixelFormat = drawablePixelFormat;
-                // pipelineDescriptor.colorAttachments[0].blendingEnabled = YES;
-                /*
+                pipelineDescriptor.colorAttachments[0].blendingEnabled = YES;
                 pipelineDescriptor.colorAttachments[0].sourceRGBBlendFactor        = MTLBlendFactorSourceAlpha;
                 pipelineDescriptor.colorAttachments[0].sourceAlphaBlendFactor      = MTLBlendFactorSourceAlpha;
                 pipelineDescriptor.colorAttachments[0].destinationRGBBlendFactor   = MTLBlendFactorOneMinusSourceAlpha;
                 pipelineDescriptor.colorAttachments[0].destinationAlphaBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
-                */
 
                 pipelineDescriptor.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float;
 
@@ -292,7 +257,7 @@ samplingShader(RasterizerData in [[stage_in]],\n\
     [renderEncoder setFragmentTexture:_texture
                               atIndex:QEMUTextureIndexBaseColor];
     
-    [renderEncoder setFragmentTexture:_cursorTexture
+    [renderEncoder setFragmentTexture:_cursorVisible ? _cursorTexture : _cursorTexturePlaceholder
                               atIndex:QEMUTextureIndexCursorColor];
 
     
@@ -342,7 +307,7 @@ samplingShader(RasterizerData in [[stage_in]],\n\
                 bytesPerRow:stride];
 }
 
-- (void)defineCursorTextureWithBuffer:(const uint8_t*)srcBytes
+- (void)defineCursorTextureWithBuffer:(const void *)srcBytes
                                 width:(int)width
                                height:(int)height
                                stride:(int)stride
