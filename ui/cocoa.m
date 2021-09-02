@@ -1246,9 +1246,21 @@ QemuMetalRenderer *renderer;
     }
 }
 
+- (void)render
+{
+    @synchronized(_metalLayer)
+    {
+        [_delegate renderToMetalLayer:_metalLayer];
+    }
+}
+
 - (void)renderOnEvent
 {
-    [_delegate renderToMetalLayer:_metalLayer];
+    //[_delegate renderToMetalLayer:_metalLayer];
+    dispatch_queue_t globalQueue = dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0);
+    dispatch_async(globalQueue, ^(){
+        [self render];
+    });
 }
 
 - (void)resizeDrawable:(CGFloat)scaleFactor
@@ -1262,15 +1274,18 @@ QemuMetalRenderer *renderer;
         return;
     }
 
-    if(newSize.width == _metalLayer.drawableSize.width &&
-       newSize.height == _metalLayer.drawableSize.height)
+    @synchronized(_metalLayer)
     {
-        return;
+        if(newSize.width == _metalLayer.drawableSize.width &&
+                newSize.height == _metalLayer.drawableSize.height)
+        {
+            return;
+        }
+
+        _metalLayer.drawableSize = newSize;
+
+        [_delegate drawableResize:newSize];
     }
-
-    _metalLayer.drawableSize = newSize;
-
-    [_delegate drawableResize:newSize];
 }
 
 - (void) updateUIInfo
@@ -1388,9 +1403,10 @@ QemuMetalRenderer *renderer;
     }
 
     CGSize drawableSize = CGSizeMake(w, h);
-    [_delegate drawableResize:drawableSize];
+    @synchronized(_metalLayer) {
+        [_delegate drawableResize:drawableSize];
+    }
 
-    [self setNeedsDisplayInRect:self.bounds];
     /*
      * XXX: avoid this temporarily
     if (isResize) {
@@ -2324,7 +2340,7 @@ static void cocoa_update(DisplayChangeListener *dcl,
 	*/
         [cocoaView setNeedsDisplayInRect:rect];
 	//[metalView updateMetalRect:MTLRegionMake2D(x, y, w, h)];
-    [metalView updateMetalAtX:x y:y width:w height:h];
+        [metalView updateMetalAtX:x y:y width:w height:h];
     });
 
     [pool release];
@@ -2442,10 +2458,10 @@ static void cocoa_mouse_set(DisplayChangeListener *dcl,
         [cocoaView setCursorRect:rect];
         [cocoaView setCursorVisible:visible ? YES : NO];
         // Mark new cursor rect as dirty
-        [renderer setCursorVisible:visible ? YES : NO x:x y:y];
-        [metalView renderOnEvent];
 
         [cocoaView setNeedsDisplayInRect:rect];
+        [renderer setCursorVisible:visible ? YES : NO x:x y:y];
+        [metalView renderOnEvent];
     });
     [pool release];
 }

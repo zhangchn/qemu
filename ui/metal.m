@@ -70,7 +70,7 @@ typedef struct
         _drawableRenderDescriptor = [MTLRenderPassDescriptor new];
         _drawableRenderDescriptor.colorAttachments[0].loadAction = MTLLoadActionClear;
         _drawableRenderDescriptor.colorAttachments[0].storeAction = MTLStoreActionStore;
-        _drawableRenderDescriptor.colorAttachments[0].clearColor = MTLClearColorMake(0, 1, 1, 1);
+        _drawableRenderDescriptor.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 1);
         _drawableRenderDescriptor.depthAttachment.loadAction = MTLLoadActionClear;
         _drawableRenderDescriptor.depthAttachment.storeAction = MTLStoreActionDontCare;
         _drawableRenderDescriptor.depthAttachment.clearDepth = 1.0;
@@ -123,7 +123,17 @@ samplingShader(RasterizerData in [[stage_in]],\n\
 {\n\
     constexpr sampler textureSampler (mag_filter::linear,\n\
                                       min_filter::linear);\n\
-    const half4 colorSample = in.position.z == 1.0 ? colorTexture.sample(textureSampler, in.textureCoordinate) : cursorTexture.sample(textureSampler, in.textureCoordinate);\n\
+    constexpr sampler cursorTextureSampler (mag_filter::linear,\n\
+                                            min_filter::linear);\n\
+    half4 colorSample;\n\
+    colorSample = colorTexture.sample(textureSampler, in.textureCoordinate);\n\
+    /* if (in.position.z > 0.5) {\n\
+        colorSample = colorTexture.sample(textureSampler, in.textureCoordinate);\n\
+        colorSample.a = 1.0;\n\
+    } else {\n\
+        colorSample = cursorTexture.sample(cursorTextureSampler, in.textureCoordinate);\n\
+    } */\n\
+    // const half4 colorSample = in.position.z > 0.5 ? colorTexture.sample(textureSampler, in.textureCoordinate) : cursorTexture.sample(cursorTextureSampler, in.textureCoordinate);\n\
     return float4(colorSample);\n\
 }\n\
 ";
@@ -152,30 +162,32 @@ samplingShader(RasterizerData in [[stage_in]],\n\
                     return;
                 }
 
+                /*
                 float cursorMaxX = 128.0 / 640.0 - 1.0;
                 float cursorMinX = -1.0;
                 float cursorMaxY = 1.0;
                 float cursorMinY = 1.0 - 128.0 / 480.0;
+                */
 
                 // Set up a simple MTLBuffer with the vertices, including position and texture coordinates
                 static const QEMUVertex quadVertices[] =
                 {
                     // display vertex positions, texture coordinates
-                    { {  1.f,  -1.f,  1.0 },  { 1.f, 1.f } },
-                    { { -1.f,  -1.f,  1.0 },  { 0.f, 1.f } },
-                    { { -1.f,   1.f,  1.0 },  { 0.f, 0.f } },
+                    { {  1.f,  -1.f,  0.9f },  { 1.f, 1.f } },
+                    { { -1.f,  -1.f,  0.9f },  { 0.f, 1.f } },
+                    { { -1.f,   1.f,  0.9f },  { 0.f, 0.f } },
 
-                    { {  1.f,  -1.f,  1.0 },  { 1.f, 1.f } },
-                    { { -1.f,   1.f,  1.0 },  { 0.f, 0.f } },
-                    { {  1.f,   1.f,  1.0 },  { 1.f, 0.f } },
+                    { {  1.f,  -1.f,  0.9f },  { 1.f, 1.f } },
+                    { { -1.f,   1.f,  0.9f },  { 0.f, 0.f } },
+                    { {  1.f,   1.f,  0.9f },  { 1.f, 0.f } },
                     // cursor vertex positions, texture coordinates
-                    { {  -0.8, 0.7333333, 0.0 },  { 1.f, 1.f } },
-                    { {  -1.f, 0.7333333, 0.0 },  { 0.f, 1.f } },
-                    { {  -1.f, 1.f, 0.0 },  { 0.f, 0.f } },
+                    { {  -0.8, 0.7333333, 0.1f },  { 1.f, 1.f } },
+                    { {  -1.f, 0.7333333, 0.1f },  { 0.f, 1.f } },
+                    { {  -1.f, 1.f, 0.1f },  { 0.f, 0.f } },
 
-                    { {  -0.8, 0.7333333, 0.0 },  { 1.f, 1.f } },
-                    { {  -1.f, 1.f, 0.0 },  { 0.f, 0.f } },
-                    { {  -0.8, 1.f, 0.0 },  { 1.f, 0.f } },
+                    { {  -0.8, 0.7333333, 0.1f },  { 1.f, 1.f } },
+                    { {  -1.f, 1.f, 0.1f },  { 0.f, 0.f } },
+                    { {  -0.8, 1.f, 0.1f },  { 1.f, 0.f } },
 
                 };
 
@@ -205,6 +217,14 @@ samplingShader(RasterizerData in [[stage_in]],\n\
                 pipelineDescriptor.vertexFunction                  = vertexProgram;
                 pipelineDescriptor.fragmentFunction                = fragmentProgram;
                 pipelineDescriptor.colorAttachments[0].pixelFormat = drawablePixelFormat;
+                // pipelineDescriptor.colorAttachments[0].blendingEnabled = YES;
+                /*
+                pipelineDescriptor.colorAttachments[0].sourceRGBBlendFactor        = MTLBlendFactorSourceAlpha;
+                pipelineDescriptor.colorAttachments[0].sourceAlphaBlendFactor      = MTLBlendFactorSourceAlpha;
+                pipelineDescriptor.colorAttachments[0].destinationRGBBlendFactor   = MTLBlendFactorOneMinusSourceAlpha;
+                pipelineDescriptor.colorAttachments[0].destinationAlphaBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
+                */
+
                 pipelineDescriptor.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float;
 
                 NSError *pipelineError;
@@ -327,7 +347,9 @@ samplingShader(RasterizerData in [[stage_in]],\n\
                                height:(int)height
                                stride:(int)stride
 {
-    if (width != _cursorRect.z || height != _cursorRect.w) {
+    NSLog(@"defineCursorTexture: %d %d", width, height);
+    if (width != _cursorRect.z || height != _cursorRect.w || !_cursorTexture) {
+        NSLog(@"prepare cursor texture");
         MTLTextureDescriptor *textureDescriptor = [[MTLTextureDescriptor alloc] init];
         textureDescriptor.pixelFormat = MTLPixelFormatBGRA8Unorm;
         textureDescriptor.width = width;
@@ -339,11 +361,33 @@ samplingShader(RasterizerData in [[stage_in]],\n\
         _cursorRect.z = width;
         _cursorRect.w = height;
     }
-    MTLRegion region = MTLRegionMake2D(_cursorRect.x, _cursorRect.y, width, height);
+    MTLRegion region = MTLRegionMake2D(0, 0, width, height);
+    /*
+    uint8_t *test = malloc(stride * height);
+    int j;
+    for (j = 0; j < stride * height; j++)
+        test[j] = (j % 2) ? 255 : 0;
+
+        */
     [_cursorTexture replaceRegion:region
                       mipmapLevel:0
                         withBytes:srcBytes
                       bytesPerRow:stride];
+    // free(test);
+    /*
+    int i, j, k;
+    for (k = 0; k < 4; k++)
+        for (j = 0; j < height; j++) {
+            char line[width];
+            for (i = 0; i < width; i++) {
+                char pix_rep[] = {'_', '+', '#', '@'};
+                line[i] = pix_rep[srcBytes[j * stride + i * 4 + k] / 64];
+            }
+            NSString *lineString = [[NSString alloc] initWithBytes:line length:width encoding:NSASCIIStringEncoding];
+            NSLog(@"%d:%3d %@", k, j, lineString);
+            [lineString release];
+        }
+        */
 }
 
 - (void)setCursorVisible:(BOOL)visibility x:(int)x y:(int)y
@@ -356,7 +400,7 @@ samplingShader(RasterizerData in [[stage_in]],\n\
     float cursorMinX = _cursorRect.x * 2.0 / _viewportSize.x - 1.0;
     float cursorMaxY = 1.0 - _cursorRect.y * 2.0 / _viewportSize.y;
     float cursorMinY = 1.0 - (_cursorRect.y + _cursorRect.w) * 2.0 / _viewportSize.y;
-    NSLog(@"%.1f, %.1f, %.1f, %.1f", cursorMinX, cursorMaxY, x, y);
+    // NSLog(@"%.1f, %.1f, %.1f, %.1f", cursorMinX, cursorMaxY, x, y);
 
     QEMUVertex *quadVertices = [_vertices contents];
     if (quadVertices) {
