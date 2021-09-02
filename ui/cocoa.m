@@ -1225,11 +1225,11 @@ QemuMetalRenderer *renderer;
         int bitsPerPixel = PIXMAN_FORMAT_BPP(pixman_image_get_format(pixman_image));
         int stride = pixman_image_get_stride(pixman_image);
         int offset = x * bitsPerPixel / 8 + stride * y;
-        const uint8_t *bytes = pixman_image_get_data(pixman_image) + offset;
+        const uint8_t *bytes = (uint8_t *)pixman_image_get_data(pixman_image) + offset;
         [renderer updateDisplayTextureWithBuffer:bytes
                                                x:x
                                                y:y
-                                           width:width
+                                           width:w
                                           height:h
                                           stride:stride];
             
@@ -2420,7 +2420,7 @@ static void cocoa_cursor_define(DisplayChangeListener *dcl, QEMUCursor *c)
         CGRect rect = [cocoaView cursorRect];
         rect.size = CGSizeMake(width / contentsScale, height / contentsScale);
         [cocoaView setCursorRect:rect];
-        [renderer defineCursorTexture:c->data width:c->width, height:c->height stride:stride];
+        [renderer defineCursorTextureWithBuffer:c->data width:c->width height:c->height stride:stride];
     });
     [pool release];
 }
@@ -2442,7 +2442,7 @@ static void cocoa_mouse_set(DisplayChangeListener *dcl,
         [cocoaView setCursorRect:rect];
         [cocoaView setCursorVisible:visible ? YES : NO];
         // Mark new cursor rect as dirty
-        [renderer setCursorVisible:visible x:x y:y];
+        [renderer setCursorVisible:visible ? YES : NO x:x y:y];
         [metalView renderOnEvent];
 
         [cocoaView setNeedsDisplayInRect:rect];
