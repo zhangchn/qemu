@@ -72,6 +72,8 @@
 
 #define cgrect(nsrect) (*(CGRect *)&(nsrect))
 
+#define COCOA_METAL_VIEW (1)
+
 typedef struct {
     int width;
     int height;
@@ -93,7 +95,7 @@ static void cocoa_mouse_set(DisplayChangeListener *dcl,
 static void cocoa_cursor_define(DisplayChangeListener *dcl, QEMUCursor *c);
 
 static NSWindow *normalWindow, *about_window;
-static NSWindow *metalWindow;
+// static NSWindow *metalWindow;
 static const DisplayChangeListenerOps dcl_ops = {
     .dpy_name          = "cocoa",
     .dpy_gfx_update = cocoa_update,
@@ -373,7 +375,6 @@ static void handleAnyDeviceErrors(Error * err)
 @end
 
 QemuCocoaView *cocoaView;
-QemuMetalView *metalView;
 QemuMetalRenderer *renderer;
 
 @implementation QemuCocoaView
@@ -1389,17 +1390,17 @@ QemuMetalRenderer *renderer;
     CGFloat dh = h - oldh;
     NSLog(@"metalView: oldh: %d newh: %d; scale: %.1f", oldh, h, currentContentsScale);
     NSRect f = NSMakeRect(
-        [metalWindow frame].origin.x,
-        [metalWindow frame].origin.y - dh / currentContentsScale,
+        [normalWindow frame].origin.x,
+        [normalWindow frame].origin.y - dh / currentContentsScale,
         w / currentContentsScale,
-        [metalWindow frame].size.height + dh / currentContentsScale);
+        [normalWindow frame].size.height + dh / currentContentsScale);
     if (isFullscreen) {
         //[[fullScreenWindow contentView] setFrame:[[NSScreen mainScreen] frame]];
-        [metalWindow setFrame:f display:NO animate:NO];
+        [normalWindow setFrame:f display:NO animate:NO];
     } else {
         if (qemu_name)
-            [metalWindow setTitle:[NSString stringWithFormat:@"QEMU %s", qemu_name]];
-        [metalWindow setFrame:f display:YES animate:NO];
+            [normalWindow setTitle:[NSString stringWithFormat:@"QEMU %s", qemu_name]];
+        [normalWindow setFrame:f display:YES animate:NO];
     }
 
     CGSize drawableSize = CGSizeMake(w, h);
@@ -1459,20 +1460,20 @@ QemuMetalRenderer *renderer;
     if (self) {
 
         // create a view and add it to the window
+#if COCOA_METAL_VIEW
+        QemuMetalView *metalView = [[QemuMetalView alloc] initWithFrame:NSMakeRect(0.0, 0.0, 320.0, 240.0)];
+        cocoaView = metalView;
+        id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+        metalView.metalLayer.device = device;
+        renderer = [[QemuMetalRenderer alloc] initWithMetalDevice:device drawablePixelFormat:metalView.metalLayer.pixelFormat];
+        metalView.delegate = renderer;
+#else
         cocoaView = [[QemuCocoaView alloc] initWithFrame:NSMakeRect(0.0, 0.0, 640.0, 480.0)];
+#endif
         if(!cocoaView) {
             error_report("(cocoa) can't create a view");
             exit(1);
         }
-
-        metalView = [[QemuMetalView alloc] initWithFrame:NSMakeRect(0.0, 0.0, 320.0, 240.0)];
-
-        id<MTLDevice> device = MTLCreateSystemDefaultDevice();
-
-        metalView.metalLayer.device = device;
-        renderer = [[QemuMetalRenderer alloc] initWithMetalDevice:device drawablePixelFormat:metalView.metalLayer.pixelFormat];
-        metalView.delegate = renderer;
-	
 
         // create a window
         normalWindow = [[NSWindow alloc] initWithContentRect:[cocoaView frame]
@@ -1491,6 +1492,7 @@ QemuMetalRenderer *renderer;
         stretch_video = false;
 
         // create a metal window
+        /*
         metalWindow = [[NSWindow alloc] initWithContentRect:[metalView frame]
             styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskMiniaturizable|NSWindowStyleMaskClosable
             backing:NSBackingStoreBuffered defer:NO];
@@ -1504,6 +1506,7 @@ QemuMetalRenderer *renderer;
         [metalWindow makeKeyAndOrderFront:self];
         [metalWindow center];
         [metalWindow setDelegate: self];
+        */
  
         /* Used for displaying pause on the screen */
         pauseLabel = [NSTextField new];
@@ -1532,8 +1535,6 @@ QemuMetalRenderer *renderer;
 
     if (cocoaView)
         [cocoaView release];
-    if (metalView)
-	[metalView release];
     [super dealloc];
 }
 
@@ -1574,14 +1575,11 @@ QemuMetalRenderer *renderer;
 - (void)windowDidChangeScreen:(NSNotification *)notification
 {
     [cocoaView updateUIInfo];
-    // [metalView updateUIInfo];
 }
 
 - (void)windowDidResize:(NSNotification *)notification
 {
     [cocoaView updateUIInfo];
-    [metalView updateUIInfo];
-    //[renderer mtkView:metalView drawableSizeWillChange:
 }
 
 /* Called when the user clicks on a window's close button */
@@ -2319,6 +2317,11 @@ int main (int argc, char **argv) {
 static void cocoa_update(DisplayChangeListener *dcl,
                          int x, int y, int w, int h)
 {
+#if COCOA_METAL_VIEW
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [(QemuMetalView *)cocoaView updateMetalAtX:x y:y width:w height:h];
+    });
+#else
     NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
 
     COCOA_DEBUG("qemu_cocoa: cocoa_update\n");
@@ -2339,11 +2342,9 @@ static void cocoa_update(DisplayChangeListener *dcl,
         }
 	*/
         [cocoaView setNeedsDisplayInRect:rect];
-	//[metalView updateMetalRect:MTLRegionMake2D(x, y, w, h)];
-        [metalView updateMetalAtX:x y:y width:w height:h];
     });
-
     [pool release];
+#endif
 }
 
 static void cocoa_switch(DisplayChangeListener *dcl,
@@ -2366,7 +2367,6 @@ static void cocoa_switch(DisplayChangeListener *dcl,
 
     dispatch_async(dispatch_get_main_queue(), ^{
         [cocoaView switchSurface:image];
-        [metalView switchSurface:image];
     });
     [pool release];
 }
@@ -2405,13 +2405,17 @@ static void cocoa_refresh(DisplayChangeListener *dcl)
 
 static void cocoa_cursor_define(DisplayChangeListener *dcl, QEMUCursor *c)
 {
-    NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
 
     COCOA_DEBUG("qemu_cocoa: cocoa_cursor_define\n");
     int bitsPerComponent = [cocoaView gscreen].bitsPerComponent;
-    int bitsPerPixel = [cocoaView gscreen].bitsPerPixel;
     float contentsScale = [cocoaView currentContentsScale];
     int stride = c->width * bitsPerComponent / contentsScale;
+
+#if COCOA_METAL_VIEW
+    [renderer defineCursorTextureWithBuffer:c->data width:c->width height:c->height stride:stride];
+#else
+    int bitsPerPixel = [cocoaView gscreen].bitsPerPixel;
+    NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
     CGDataProviderRef provider = CGDataProviderCreateWithData(NULL, c->data, c->width * 4 * c->height, NULL);
 
     CGImageRef img = CGImageCreate(
@@ -2436,14 +2440,18 @@ static void cocoa_cursor_define(DisplayChangeListener *dcl, QEMUCursor *c)
         CGRect rect = [cocoaView cursorRect];
         rect.size = CGSizeMake(width / contentsScale, height / contentsScale);
         [cocoaView setCursorRect:rect];
-        [renderer defineCursorTextureWithBuffer:c->data width:c->width height:c->height stride:stride];
     });
     [pool release];
+#endif
 }
 
 static void cocoa_mouse_set(DisplayChangeListener *dcl,
                             int x, int y, int visible)
 {
+#if COCOA_METAL_VIEW
+    [renderer setCursorVisible:visible ? YES : NO x:x y:y];
+    [(QemuMetalView *)cocoaView renderOnEvent];
+#else // Core Graphics based
     NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
 
     COCOA_DEBUG("qemu_cocoa: cocoa_mouse_set\n");
@@ -2460,10 +2468,10 @@ static void cocoa_mouse_set(DisplayChangeListener *dcl,
         // Mark new cursor rect as dirty
 
         [cocoaView setNeedsDisplayInRect:rect];
-        [renderer setCursorVisible:visible ? YES : NO x:x y:y];
-        [metalView renderOnEvent];
+        
     });
     [pool release];
+#endif // COCOA_METAL_VIEW
 }
 
 static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
