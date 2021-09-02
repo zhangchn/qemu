@@ -44,8 +44,9 @@ typedef struct
     NSUInteger _numVertices;
     vector_uint2 _viewportSize;
     vector_uint4 _cursorRect;
+    BOOL _cursorVisible;
     MTLRenderPassDescriptor *_drawableRenderDescriptor;
-    MTLDepthStencilDescriptor *_depthState;
+    id<MTLDepthStencilState> _depthState;
     
 }
 
@@ -106,7 +107,7 @@ struct RasterizerData\n\
 \n\
 vertex RasterizerData\n\
 vertexShader(uint vertexID [[ vertex_id ]],\n\
-             constant QEMUVertex *vertexArray [[ buffer(AAPLVertexInputIndexVertices) ]])\n\
+             constant QEMUVertex *vertexArray [[ buffer(QEMUVertexInputIndexVertices) ]])\n\
 {\n\
     RasterizerData out;\n\
     out.position = vector_float4(0.0, 0.0, 0.0, 1.0);\n\
@@ -117,13 +118,12 @@ vertexShader(uint vertexID [[ vertex_id ]],\n\
 \n\
 fragment float4 \n\
 samplingShader(RasterizerData in [[stage_in]],\n\
-               texture2d<half> colorTexture [[ texture(QEMUTextureIndexBaseColor) ]])\n\
+               texture2d<half> colorTexture [[ texture(QEMUTextureIndexBaseColor) ]],\n\
                texture2d<half> cursorTexture [[ texture(QEMUTextureIndexCursorColor) ]])\n\
 {\n\
     constexpr sampler textureSampler (mag_filter::linear,\n\
                                       min_filter::linear);\n\
     const half4 colorSample = in.position.z == 1.0 ? colorTexture.sample(textureSampler, in.textureCoordinate) : cursorTexture.sample(textureSampler, in.textureCoordinate);\n\
-    
     return float4(colorSample);\n\
 }\n\
 ";
@@ -135,6 +135,7 @@ samplingShader(RasterizerData in [[stage_in]],\n\
 
                 if (!shaderLib) {
                     NSLog(@" ERROR: Couldnt create a default shader library");
+                    NSLog(@"%@", error);
                     return;
                 }
                 id <MTLFunction> vertexProgram = [shaderLib newFunctionWithName:@"vertexShader"];
@@ -151,10 +152,10 @@ samplingShader(RasterizerData in [[stage_in]],\n\
                     return;
                 }
 
-                float cursorMaxX = (_cursorRect.x + cursorRect.z) * 2.0 / _viewportSize.x - 1.0;
-                float cursorMinX = _cursorRect.x * 2.0 / _viewportSize.x - 1.0;
-                float cursorMaxY = 1.0 - _cursorRect.y * 2.0 / _viewportSize.y;
-                float cursorMinY = 1.0 - (_cursorRect.y + cursorRect.w) * 2.0 / _viewportSize.y;
+                float cursorMaxX = 128.0 / 640.0 - 1.0;
+                float cursorMinX = -1.0;
+                float cursorMaxY = 1.0;
+                float cursorMinY = 1.0 - 128.0 / 480.0;
 
                 // Set up a simple MTLBuffer with the vertices, including position and texture coordinates
                 static const QEMUVertex quadVertices[] =
@@ -168,13 +169,13 @@ samplingShader(RasterizerData in [[stage_in]],\n\
                     { { -1.f,   1.f,  1.0 },  { 0.f, 0.f } },
                     { {  1.f,   1.f,  1.0 },  { 1.f, 0.f } },
                     // cursor vertex positions, texture coordinates
-                    { {  cursorMaxX, cursorMinY, 0.0 },  { 1.f, 1.f } },
-                    { {  cursorMinX, cursorMinY, 0.0 },  { 0.f, 1.f } },
-                    { {  cursorMinX, cursorMaxY, 0.0 },  { 0.f, 0.f } },
+                    { {  -0.8, 0.7333333, 0.0 },  { 1.f, 1.f } },
+                    { {  -1.f, 0.7333333, 0.0 },  { 0.f, 1.f } },
+                    { {  -1.f, 1.f, 0.0 },  { 0.f, 0.f } },
 
-                    { {  cursorMaxX, cursorMinY, 0.0 },  { 1.f, 1.f } },
-                    { {  cursorMinX, cursorMaxX, 0.0 },  { 0.f, 0.f } },
-                    { {  cursorMaxX, cursorMaxY, 0.0 },  { 1.f, 0.f } },
+                    { {  -0.8, 0.7333333, 0.0 },  { 1.f, 1.f } },
+                    { {  -1.f, 1.f, 0.0 },  { 0.f, 0.f } },
+                    { {  -0.8, 1.f, 0.0 },  { 1.f, 0.f } },
 
                 };
 
@@ -298,7 +299,7 @@ samplingShader(RasterizerData in [[stage_in]],\n\
     MTLTextureDescriptor *depthTargetDescriptor = [MTLTextureDescriptor new];
     depthTargetDescriptor.width       = drawableSize.width;
     depthTargetDescriptor.height      = drawableSize.height;
-    depthTargetDescriptor.pixelFormat = AAPLDepthPixelFormat;
+    depthTargetDescriptor.pixelFormat = MTLPixelFormatDepth32Float;
     depthTargetDescriptor.storageMode = MTLStorageModePrivate;
     depthTargetDescriptor.usage       = MTLTextureUsageRenderTarget;
 
@@ -333,7 +334,10 @@ samplingShader(RasterizerData in [[stage_in]],\n\
         textureDescriptor.height = height;
         id<MTLTexture> texture = [_device newTextureWithDescriptor:textureDescriptor];
         [textureDescriptor release];
+        [_cursorTexture release];
         _cursorTexture = texture;
+        _cursorRect.z = width;
+        _cursorRect.w = height;
     }
     MTLRegion region = MTLRegionMake2D(_cursorRect.x, _cursorRect.y, width, height);
     [_cursorTexture replaceRegion:region
@@ -345,22 +349,30 @@ samplingShader(RasterizerData in [[stage_in]],\n\
 - (void)setCursorVisible:(BOOL)visibility x:(int)x y:(int)y
 {
     _cursorVisible = visibility;
-    _cursorRect.x = MIN(MAX(x, 0), _viewportSize.x)
-    _cursorRect.y = MIN(MAX(y, 0), _viewportSize.y)
+    _cursorRect.x = MIN(MAX(x, 0), _viewportSize.x);
+    _cursorRect.y = MIN(MAX(y, 0), _viewportSize.y);
     // update cursor quad position
-    float cursorMaxX = (_cursorRect.x + cursorRect.z) * 2.0 / _viewportSize.x - 1.0;
+    float cursorMaxX = (_cursorRect.x + _cursorRect.z) * 2.0 / _viewportSize.x - 1.0;
     float cursorMinX = _cursorRect.x * 2.0 / _viewportSize.x - 1.0;
     float cursorMaxY = 1.0 - _cursorRect.y * 2.0 / _viewportSize.y;
-    float cursorMinY = 1.0 - (_cursorRect.y + cursorRect.w) * 2.0 / _viewportSize.y;
+    float cursorMinY = 1.0 - (_cursorRect.y + _cursorRect.w) * 2.0 / _viewportSize.y;
+    NSLog(@"%.1f, %.1f, %.1f, %.1f", cursorMinX, cursorMaxY, x, y);
 
     QEMUVertex *quadVertices = [_vertices contents];
     if (quadVertices) {
-        quadVertices[6].position  = {  cursorMaxX, cursorMinY, 0.0 };
-        quadVertices[7].position  = {  cursorMinX, cursorMinY, 0.0 };
-        quadVertices[8].position  = {  cursorMinX, cursorMaxY, 0.0 };
-        quadVertices[9].position  = {  cursorMaxX, cursorMinY, 0.0 };
-        quadVertices[10].position = {  cursorMinX, cursorMaxX, 0.0 };
-        quadVertices[11].position = {  cursorMaxX, cursorMaxY, 0.0 };
+        quadVertices[6].position.x  =  cursorMaxX;
+        quadVertices[6].position.y  =  cursorMinY;
+        quadVertices[7].position.x  =  cursorMinX;
+        quadVertices[7].position.y  =  cursorMinY;
+        quadVertices[8].position.x  =  cursorMinX;
+        quadVertices[8].position.y  =  cursorMaxY;
+
+        quadVertices[9].position.x  =  cursorMaxX;
+        quadVertices[9].position.y  =  cursorMinY;
+        quadVertices[10].position.x =  cursorMinX;
+        quadVertices[10].position.y =  cursorMaxY;
+        quadVertices[11].position.x =  cursorMaxX;
+        quadVertices[11].position.y =  cursorMaxY;
     }
 }
 @end
