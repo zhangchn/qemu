@@ -38,7 +38,7 @@ typedef struct
     id<MTLRenderPipelineState> _pipelineState;
     id<MTLCommandQueue> _commandQueue;
     id<MTLTexture> _depthTarget;
-    id<MTLTexture> _texture;
+    id<MTLTexture> _baseTexture;
     id<MTLTexture> _cursorTexture;
     id<MTLTexture> _cursorTexturePlaceholder;
     id<MTLBuffer> _vertices;
@@ -115,10 +115,11 @@ typedef struct
                 }
 
                 /*
-                float cursorMaxX = 128.0 / 640.0 - 1.0;
-                float cursorMinX = -1.0;
-                float cursorMaxY = 1.0;
-                float cursorMinY = 1.0 - 128.0 / 480.0;
+                   cursor rect calculated from Qemu Screen metrics:
+                   MaxX = 2 * width / 640.0 - 1.0;
+                   MinX = -1.0;
+                   MaxY = 1.0;
+                   MinY = 1.0 - 2 * height / 480.0;
                 */
 
                 // Set up a simple MTLBuffer with the vertices, including position and texture coordinates
@@ -154,12 +155,12 @@ typedef struct
 
                 CGSize s = CGSizeMake(_viewportSize.x, _viewportSize.y);
                 [self prepareTexture:s];
-                [_texture replaceRegion:MTLRegionMake2D(0, 0, _viewportSize.x, _viewportSize.y)
+                [_baseTexture replaceRegion:MTLRegionMake2D(0, 0, _viewportSize.x, _viewportSize.y)
                             mipmapLevel:0
                               withBytes:placeholder
                             bytesPerRow:_viewportSize.x * 4];
 
-                // cursor placeholder:
+                // prepare cursor placeholder texture
                 MTLTextureDescriptor *textureDescriptor = [[MTLTextureDescriptor alloc] init];
                 textureDescriptor.pixelFormat = MTLPixelFormatBGRA8Unorm;
                 textureDescriptor.width = 1;
@@ -167,16 +168,11 @@ typedef struct
                 _cursorTexturePlaceholder = [_device newTextureWithDescriptor:textureDescriptor];
                 [textureDescriptor release];
                 uint8_t cursorPlaceholderBytes[] = {0, 0, 0, 0};
-                [_cursorTexturePlaceholder  replaceRegion:MTLRegionMake2D(0, 0, 1, 1)
-                                              mipmapLevel:0
-                                                withBytes:cursorPlaceholderBytes
-                                              bytesPerRow:4];
-                /*
-                [self defineCursorTextureWithBuffer:placeholder 
-                                              width:_cursorRect.z 
-                                             height:_cursorRect.w 
-                                             stride:_cursorRect.z * 4];
-                                             */
+                [_cursorTexturePlaceholder replaceRegion:MTLRegionMake2D(0, 0, 1, 1)
+                                             mipmapLevel:0
+                                               withBytes:cursorPlaceholderBytes
+                                             bytesPerRow:4];
+                
                 // Create a pipeline state descriptor to create a compiled pipeline state object
                 MTLRenderPipelineDescriptor *pipelineDescriptor = [[MTLRenderPipelineDescriptor alloc] init];
 
@@ -210,33 +206,25 @@ typedef struct
 
 - (void)prepareTexture:(CGSize)size
 {
-    NSLog(@"prepareTexture: %@", NSStringFromSize(size));
     MTLTextureDescriptor *textureDescriptor = [[MTLTextureDescriptor alloc] init];
     textureDescriptor.pixelFormat = MTLPixelFormatBGRA8Unorm;
     textureDescriptor.width = size.width;
     textureDescriptor.height = size.height;
     id<MTLTexture> texture = [_device newTextureWithDescriptor:textureDescriptor];
     [textureDescriptor autorelease];
-    _texture = texture;
+    _baseTexture = texture;
 }
 
 - (void)renderToMetalLayer:(nonnull CAMetalLayer*)metalLayer
 {
-
-    // NSLog(@"renderToMetalLayer");
-    // Create a new command buffer for each render pass to the current drawable.
     id <MTLCommandBuffer> commandBuffer = [_commandQueue commandBuffer];
 
     id<CAMetalDrawable> currentDrawable = [metalLayer nextDrawable];
 
-    // If the current drawable is nil, skip rendering this frame
-    if(!currentDrawable || !_pipelineState || !_texture)
+    if(!currentDrawable || !_pipelineState || !_baseTexture)
     {
         return;
     }
-    // NSLog(@"_viewportSize: %d, %d", _viewportSize.x, _viewportSize.y);
-    // NSLog(@"_numVertices: %d", _numVertices);
-
     _drawableRenderDescriptor.colorAttachments[0].texture = currentDrawable.texture;
     
     id <MTLRenderCommandEncoder> renderEncoder =
@@ -254,7 +242,7 @@ typedef struct
     [renderEncoder setVertexBytes:&_viewportSize
                            length:sizeof(_viewportSize)
                           atIndex:QEMUVertexInputIndexViewportSize ];
-    [renderEncoder setFragmentTexture:_texture
+    [renderEncoder setFragmentTexture:_baseTexture
                               atIndex:QEMUTextureIndexBaseColor];
     
     [renderEncoder setFragmentTexture:_cursorVisible ? _cursorTexture : _cursorTexturePlaceholder
@@ -273,9 +261,7 @@ typedef struct
 
 - (void)drawableResize:(CGSize)drawableSize
 {
-    NSLog(@"drawableResize: new size: %@", NSStringFromSize(drawableSize));
     if (drawableSize.width != _viewportSize.x || drawableSize.height != _viewportSize.y) {
-        NSLog(@"drawableResize: prepare texture");
         [self prepareTexture:drawableSize];
     }
     _viewportSize.x = drawableSize.width;
@@ -301,10 +287,10 @@ typedef struct
                                 stride:(int)stride
 {
     MTLRegion region = MTLRegionMake2D(x, y, width, height);
-    [_texture replaceRegion:region
-                mipmapLevel:0
-                  withBytes:srcBytes
-                bytesPerRow:stride];
+    [_baseTexture replaceRegion:region
+                    mipmapLevel:0
+                      withBytes:srcBytes
+                    bytesPerRow:stride];
 }
 
 - (void)defineCursorTextureWithBuffer:(const void *)srcBytes
@@ -312,9 +298,7 @@ typedef struct
                                height:(int)height
                                stride:(int)stride
 {
-    //NSLog(@"defineCursorTexture: %d %d", width, height);
     if (width != _cursorRect.z || height != _cursorRect.w || !_cursorTexture) {
-        //NSLog(@"prepare cursor texture");
         MTLTextureDescriptor *textureDescriptor = [[MTLTextureDescriptor alloc] init];
         textureDescriptor.pixelFormat = MTLPixelFormatBGRA8Unorm;
         textureDescriptor.width = width;
@@ -327,32 +311,10 @@ typedef struct
         _cursorRect.w = height;
     }
     MTLRegion region = MTLRegionMake2D(0, 0, width, height);
-    /*
-    uint8_t *test = malloc(stride * height);
-    int j;
-    for (j = 0; j < stride * height; j++)
-        test[j] = (j % 2) ? 255 : 0;
-
-        */
     [_cursorTexture replaceRegion:region
                       mipmapLevel:0
                         withBytes:srcBytes
                       bytesPerRow:stride];
-    // free(test);
-    /*
-    int i, j, k;
-    for (k = 0; k < 4; k++)
-        for (j = 0; j < height; j++) {
-            char line[width];
-            for (i = 0; i < width; i++) {
-                char pix_rep[] = {'_', '+', '#', '@'};
-                line[i] = pix_rep[srcBytes[j * stride + i * 4 + k] / 64];
-            }
-            NSString *lineString = [[NSString alloc] initWithBytes:line length:width encoding:NSASCIIStringEncoding];
-            NSLog(@"%d:%3d %@", k, j, lineString);
-            [lineString release];
-        }
-        */
 }
 
 - (void)setCursorVisible:(BOOL)visibility x:(int)x y:(int)y
@@ -365,7 +327,6 @@ typedef struct
     float cursorMinX = _cursorRect.x * 2.0 / _viewportSize.x - 1.0;
     float cursorMaxY = 1.0 - _cursorRect.y * 2.0 / _viewportSize.y;
     float cursorMinY = 1.0 - (_cursorRect.y + _cursorRect.w) * 2.0 / _viewportSize.y;
-    // NSLog(@"%.1f, %.1f, %.1f, %.1f", cursorMinX, cursorMaxY, x, y);
 
     QEMUVertex *quadVertices = [_vertices contents];
     if (quadVertices) {
