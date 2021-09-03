@@ -1333,7 +1333,6 @@ QemuMetalRenderer *renderer;
     //defaultDrawableSize.width *= self.layer.contentsScale;
     //defaultDrawableSize.height *= self.layer.contentsScale;
 
-    //[_delegate drawableResize:defaultDrawableSize];
     [self resizeDrawable:self.window.screen.backingScaleFactor];
 }
 
@@ -1404,9 +1403,12 @@ QemuMetalRenderer *renderer;
     }
 
     CGSize drawableSize = CGSizeMake(w, h);
+
     @synchronized(_metalLayer) {
         [_delegate drawableResize:drawableSize];
     }
+    [self updateMetalAtX:0 y:0 width:w height: h];
+
 
     /*
      * XXX: avoid this temporarily
@@ -1491,23 +1493,6 @@ QemuMetalRenderer *renderer;
         [normalWindow setDelegate: self];
         stretch_video = false;
 
-        // create a metal window
-        /*
-        metalWindow = [[NSWindow alloc] initWithContentRect:[metalView frame]
-            styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskMiniaturizable|NSWindowStyleMaskClosable
-            backing:NSBackingStoreBuffered defer:NO];
-        if(!metalWindow) {
-            error_report("(cocoa) can't create window");
-            exit(1);
-        }
-        [metalWindow setAcceptsMouseMovedEvents:YES];
-        [metalWindow setTitle:@"QEMUMetal"];
-        [metalWindow setContentView:metalView];
-        [metalWindow makeKeyAndOrderFront:self];
-        [metalWindow center];
-        [metalWindow setDelegate: self];
-        */
- 
         /* Used for displaying pause on the screen */
         pauseLabel = [NSTextField new];
         [pauseLabel setBezeled:YES];
@@ -2361,8 +2346,6 @@ static void cocoa_switch(DisplayChangeListener *dcl,
     // We take a reference to the underlying pixman image here so it does
     // not disappear from under our feet; the switchSurface method will
     // deref the old image when it is done with it.
-    pixman_image_ref(image);
-    // XXX: double retain for two views
     pixman_image_ref(image);
 
     dispatch_async(dispatch_get_main_queue(), ^{
