@@ -9,22 +9,17 @@ typedef enum QEMUVertexInputIndex
     QEMUVertexInputIndexViewportSize = 1,
 } QEMUVertexInputIndex;
 
-// Texture index values shared between shader and C code to ensure Metal shader buffer inputs match
-//   Metal API texture set calls
+// Texture index values
+// Two textures were created for the base plane and the cursor plane, respectively
 typedef enum QEMUTextureIndex
 {
     QEMUTextureIndexBaseColor = 0,
     QEMUTextureIndexCursorColor = 1,
 } QEMUTextureIndex;
 
-//  This structure defines the layout of each vertex in the array of vertices set as an input to the
-//    Metal vertex shader.  Since this header is shared between the .metal shader and C code,
-//    you can be sure that the layout of the vertex array in the code matches the layout that
-//    the vertex shader expects
-
 typedef struct
 {
-    // Positions in pixel space with depth. A value of 100 indicates 100 pixels from the origin/center.
+    // Positions in NDC, depth to distinguish vertices from base/cursor quad.
     vector_float3 position;
 
     // 2D texture coordinate
@@ -65,8 +60,8 @@ typedef struct
         _viewportSize.y = 480;
         _cursorRect.x = 0;
         _cursorRect.y = 0;
-        _cursorRect.z = 1;
-        _cursorRect.w = 1;
+        _cursorRect.z = 64;
+        _cursorRect.w = 64;
         _cursorVisible = NO;
 
         _drawableRenderDescriptor = [MTLRenderPassDescriptor new];
@@ -82,123 +77,150 @@ typedef struct
         depthDescriptor.depthCompareFunction = MTLCompareFunctionLessEqual;
         depthDescriptor.depthWriteEnabled = YES;
         _depthState = [_device newDepthStencilStateWithDescriptor:depthDescriptor];
+        [depthDescriptor release];
         {
             
-            NSError *sourceErr;
-            NSString *source = [NSString stringWithContentsOfFile:@"/tmp/1.metal"
-                                                         encoding:NSUTF8StringEncoding
-                                                            error:&sourceErr];
-            
-            if (sourceErr) { NSLog(@"error: %@", sourceErr);} else {NSLog(@"source: \n%@", source);}
-            void *placeholder = malloc(_viewportSize.x * _viewportSize.y * 4);
-            [_device newLibraryWithSource:source
-                                  options:nil 
-                        completionHandler:^(id<MTLLibrary> shaderLib, NSError *error) {
-
-                if (!shaderLib) {
-                    NSLog(@" ERROR: Couldnt create a default shader library");
-                    NSLog(@"%@", error);
-                    return;
-                }
-                id <MTLFunction> vertexProgram = [shaderLib newFunctionWithName:@"vertexShader"];
-                if(!vertexProgram)
-                {
-                    NSLog(@">> ERROR: Couldn't load vertex function from default library");
-                    return;
-                }
-
-                id <MTLFunction> fragmentProgram = [shaderLib newFunctionWithName:@"samplingShader"];
-                if(!fragmentProgram)
-                {
-                    NSLog(@" ERROR: Couldn't load fragment function from default library");
-                    return;
-                }
-
-                /*
-                   cursor rect calculated from Qemu Screen metrics:
-                   MaxX = 2 * width / 640.0 - 1.0;
-                   MinX = -1.0;
-                   MaxY = 1.0;
-                   MinY = 1.0 - 2 * height / 480.0;
-                */
-
-                // Set up a simple MTLBuffer with the vertices, including position and texture coordinates
-                static const QEMUVertex quadVertices[] =
-                {
-                    // display vertex positions, texture coordinates
-                    { {  1.f,  -1.f,  0.9f },  { 1.f, 1.f } },
-                    { { -1.f,  -1.f,  0.9f },  { 0.f, 1.f } },
-                    { { -1.f,   1.f,  0.9f },  { 0.f, 0.f } },
-
-                    { {  1.f,  -1.f,  0.9f },  { 1.f, 1.f } },
-                    { { -1.f,   1.f,  0.9f },  { 0.f, 0.f } },
-                    { {  1.f,   1.f,  0.9f },  { 1.f, 0.f } },
-                    
-                    // cursor vertex positions, texture coordinates
-                    { {  -0.8, 0.7333333, 0.1f },  { 1.f, 1.f } },
-                    { {  -1.f, 0.7333333, 0.1f },  { 0.f, 1.f } },
-                    { {  -1.f, 1.f, 0.1f },  { 0.f, 0.f } },
-
-                    { {  -0.8, 0.7333333, 0.1f },  { 1.f, 1.f } },
-                    { {  -1.f, 1.f, 0.1f },  { 0.f, 0.f } },
-                    { {  -0.8, 1.f, 0.1f },  { 1.f, 0.f } },
-
-                };
-
-                // Create a vertex buffer, and initialize it with the vertex data.
-                _vertices = [_device newBufferWithBytes:quadVertices
-                                                 length:sizeof(quadVertices)
-                                                options:MTLResourceStorageModeShared];
-
-                _vertices.label = @"Quad";
-                _numVertices = sizeof(quadVertices) / sizeof(QEMUVertex);
-
-                CGSize s = CGSizeMake(_viewportSize.x, _viewportSize.y);
-                [self prepareTexture:s];
-                [_baseTexture replaceRegion:MTLRegionMake2D(0, 0, _viewportSize.x, _viewportSize.y)
-                            mipmapLevel:0
-                              withBytes:placeholder
-                            bytesPerRow:_viewportSize.x * 4];
-
-                // prepare cursor placeholder texture
-                MTLTextureDescriptor *textureDescriptor = [[MTLTextureDescriptor alloc] init];
-                textureDescriptor.pixelFormat = MTLPixelFormatBGRA8Unorm;
-                textureDescriptor.width = 1;
-                textureDescriptor.height = 1;
-                _cursorTexturePlaceholder = [_device newTextureWithDescriptor:textureDescriptor];
-                [textureDescriptor release];
-                uint8_t cursorPlaceholderBytes[] = {0, 0, 0, 0};
-                [_cursorTexturePlaceholder replaceRegion:MTLRegionMake2D(0, 0, 1, 1)
-                                             mipmapLevel:0
-                                               withBytes:cursorPlaceholderBytes
-                                             bytesPerRow:4];
-                
-                // Create a pipeline state descriptor to create a compiled pipeline state object
-                MTLRenderPipelineDescriptor *pipelineDescriptor = [[MTLRenderPipelineDescriptor alloc] init];
-
-                pipelineDescriptor.label                           = @"MyPipeline";
-                pipelineDescriptor.vertexFunction                  = vertexProgram;
-                pipelineDescriptor.fragmentFunction                = fragmentProgram;
-                pipelineDescriptor.colorAttachments[0].pixelFormat = drawablePixelFormat;
-                pipelineDescriptor.colorAttachments[0].blendingEnabled = YES;
-                pipelineDescriptor.colorAttachments[0].sourceRGBBlendFactor        = MTLBlendFactorSourceAlpha;
-                pipelineDescriptor.colorAttachments[0].sourceAlphaBlendFactor      = MTLBlendFactorSourceAlpha;
-                pipelineDescriptor.colorAttachments[0].destinationRGBBlendFactor   = MTLBlendFactorOneMinusSourceAlpha;
-                pipelineDescriptor.colorAttachments[0].destinationAlphaBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
-
-                pipelineDescriptor.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float;
-
-                NSError *pipelineError;
-                _pipelineState = [_device newRenderPipelineStateWithDescriptor:pipelineDescriptor
-                                                                         error:&pipelineError];
-                if(!_pipelineState)
-                {
-                    NSLog(@"ERROR: Failed aquiring pipeline state: %@", pipelineError);
-                    return;
-                }
-                [pipelineDescriptor release];
-                NSLog(@"Success: pipeline initialized.");
+            NSString *execPath = [[[NSBundle mainBundle] executablePath] stringByDeletingLastPathComponent]; 
+            NSArray *shaderSearchPaths = @[
+                execPath,
+                [[execPath stringByAppendingString:@"../share/qemu/"] stringByStandardizingPath],
+                @"/usr/local/share/qemu"
+            ];
+            __block NSString *source;
+            [shaderSearchPaths enumerateObjectsUsingBlock:^(NSString *path, NSUInteger idx, BOOL *stop) {
+                 NSString *shaderPath = [path stringByAppendingPathComponent:@"metal_shader.metal"];
+                 NSError *sourceErr = NULL;
+                 source = [NSString stringWithContentsOfFile:shaderPath
+                                                    encoding:NSUTF8StringEncoding
+                                                       error:&sourceErr];
+                 if (!source) {
+                     NSLog(@"error reading %@: %@", shaderPath, sourceErr);
+                 } else {
+                     *stop = YES;
+                     NSLog(@"using shader source at %@", shaderPath);
+                     NSLog(@"source: %@", source);
+                     [source retain];
+                 }
             }];
+            
+            if (!source) {
+                return nil;
+            }
+            [source autorelease];
+            void *placeholder = malloc(_viewportSize.x * _viewportSize.y * 4);
+            NSError *libError;
+            id<MTLLibrary> shaderLib = [_device newLibraryWithSource:source
+                                                             options:nil 
+                                                               error:&libError];
+
+            if (!shaderLib) {
+                NSLog(@" ERROR: Couldnt create a default shader library");
+                NSLog(@"%@", libError);
+                return nil;
+            }
+            id <MTLFunction> vertexProgram = [shaderLib newFunctionWithName:@"vertexShader"];
+            if(!vertexProgram)
+            {
+                NSLog(@">> ERROR: Couldn't load vertex function from default library");
+                return nil;
+            }
+
+            id <MTLFunction> fragmentProgram = [shaderLib newFunctionWithName:@"samplingShader"];
+            [shaderLib release];
+            if(!fragmentProgram)
+            {
+                NSLog(@" ERROR: Couldn't load fragment function from default library");
+                return nil;
+            }
+
+            /*
+               cursor rect calculated from Qemu Screen metrics:
+               MaxX = 2 * width / 640.0 - 1.0;
+               MinX = -1.0;
+               MaxY = 1.0;
+               MinY = 1.0 - 2 * height / 480.0;
+            */
+
+            // Set up a simple MTLBuffer with the vertices, including position and texture coordinates
+            static const QEMUVertex quadVertices[] =
+            {
+                // display vertex positions, texture coordinates
+                { {  1.f,  -1.f,  0.9f },  { 1.f, 1.f } },
+                { { -1.f,  -1.f,  0.9f },  { 0.f, 1.f } },
+                { { -1.f,   1.f,  0.9f },  { 0.f, 0.f } },
+
+                { {  1.f,  -1.f,  0.9f },  { 1.f, 1.f } },
+                { { -1.f,   1.f,  0.9f },  { 0.f, 0.f } },
+                { {  1.f,   1.f,  0.9f },  { 1.f, 0.f } },
+                
+                // cursor vertex positions, texture coordinates
+                { {  -0.8, 0.7333333, 0.1f },  { 1.f, 1.f } },
+                { {  -1.f, 0.7333333, 0.1f },  { 0.f, 1.f } },
+                { {  -1.f, 1.f, 0.1f },  { 0.f, 0.f } },
+
+                { {  -0.8, 0.7333333, 0.1f },  { 1.f, 1.f } },
+                { {  -1.f, 1.f, 0.1f },  { 0.f, 0.f } },
+                { {  -0.8, 1.f, 0.1f },  { 1.f, 0.f } },
+
+            };
+
+            // Create a vertex buffer, and initialize it with the vertex data.
+            _vertices = [_device newBufferWithBytes:quadVertices
+                                             length:sizeof(quadVertices)
+                                            options:MTLResourceStorageModeShared];
+
+            _vertices.label = @"Quad";
+            _numVertices = sizeof(quadVertices) / sizeof(QEMUVertex);
+
+            CGSize s = CGSizeMake(_viewportSize.x, _viewportSize.y);
+            [self prepareTexture:s];
+            [_baseTexture replaceRegion:MTLRegionMake2D(0, 0, _viewportSize.x, _viewportSize.y)
+                        mipmapLevel:0
+                          withBytes:placeholder
+                        bytesPerRow:_viewportSize.x * 4];
+
+            // prepare cursor placeholder texture
+            // A buffer of 1x1 transparent pixel could suffice for invisibility of cursor state.
+            MTLTextureDescriptor *textureDescriptor = [[MTLTextureDescriptor alloc] init];
+            textureDescriptor.pixelFormat = MTLPixelFormatBGRA8Unorm;
+            textureDescriptor.width = 1;
+            textureDescriptor.height = 1;
+            _cursorTexturePlaceholder = [_device newTextureWithDescriptor:textureDescriptor];
+            [textureDescriptor release];
+            uint8_t cursorPlaceholderBytes[] = {0, 0, 0, 0};
+            [_cursorTexturePlaceholder replaceRegion:MTLRegionMake2D(0, 0, 1, 1)
+                                         mipmapLevel:0
+                                           withBytes:cursorPlaceholderBytes
+                                         bytesPerRow:4];
+            
+            // Create a pipeline state descriptor to create a compiled pipeline state object
+            MTLRenderPipelineDescriptor *pipelineDescriptor = [[MTLRenderPipelineDescriptor alloc] init];
+
+            pipelineDescriptor.label                           = @"QemuMetalPipeline";
+            pipelineDescriptor.vertexFunction                  = vertexProgram;
+            pipelineDescriptor.fragmentFunction                = fragmentProgram;
+            pipelineDescriptor.colorAttachments[0].pixelFormat = drawablePixelFormat;
+            // The settings for cursor-base blending
+            pipelineDescriptor.colorAttachments[0].blendingEnabled = YES;
+            pipelineDescriptor.colorAttachments[0].sourceRGBBlendFactor        = MTLBlendFactorSourceAlpha;
+            pipelineDescriptor.colorAttachments[0].sourceAlphaBlendFactor      = MTLBlendFactorSourceAlpha;
+            pipelineDescriptor.colorAttachments[0].destinationRGBBlendFactor   = MTLBlendFactorOneMinusSourceAlpha;
+            pipelineDescriptor.colorAttachments[0].destinationAlphaBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
+
+            pipelineDescriptor.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float;
+
+            NSError *pipelineError;
+            _pipelineState = [_device newRenderPipelineStateWithDescriptor:pipelineDescriptor
+                                                                     error:&pipelineError];
+            if(!_pipelineState)
+            {
+                NSLog(@"ERROR: Failed aquiring pipeline state: %@", pipelineError);
+                return nil;
+            }
+            [pipelineDescriptor release];
+            [vertexProgram release];
+            [fragmentProgram release];
+            NSLog(@"Success: pipeline initialized.");
         }
     }
     return self;
@@ -210,8 +232,9 @@ typedef struct
     textureDescriptor.pixelFormat = MTLPixelFormatBGRA8Unorm;
     textureDescriptor.width = size.width;
     textureDescriptor.height = size.height;
+    [_baseTexture release];
     id<MTLTexture> texture = [_device newTextureWithDescriptor:textureDescriptor];
-    [textureDescriptor autorelease];
+    [textureDescriptor release];
     _baseTexture = texture;
 }
 
