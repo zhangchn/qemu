@@ -284,6 +284,7 @@ typedef struct
 
 - (void)drawableResize:(CGSize)drawableSize
 {
+    NSLog(@"drawableResize: %dx%d -> %.0fx%.0f %@", _viewportSize.x, _viewportSize.y, drawableSize.width, drawableSize.height, [NSThread callStackSymbols]);
     if (drawableSize.width != _viewportSize.x || drawableSize.height != _viewportSize.y) {
         [self prepareTexture:drawableSize];
     }
