@@ -323,6 +323,7 @@ static void handleAnyDeviceErrors(Error * err)
     CGImageRef cursorImage;
     BOOL cursorVisible;
     float currentContentsScale;
+    BOOL isHostResizing;
 }
 - (void) switchSurface:(pixman_image_t *)image;
 - (void) grabMouse;
@@ -335,6 +336,7 @@ static void handleAnyDeviceErrors(Error * err)
 - (BOOL) isMouseGrabbed;
 - (QEMUScreen) gscreen;
 - (void) raiseAllKeys;
+- (void)setHostResizing:(BOOL)resizing;
 @end
 /*
 @protocol QemuMetalViewDelegate <NSObject>
@@ -422,6 +424,13 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 
     [super dealloc];
 }
+
+- (void)setHostResizing:(BOOL)resizing
+{
+    isHostResizing = resizing;
+
+}
+
 
 - (BOOL) isOpaque
 {
@@ -643,6 +652,7 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     info.height = frameSize.height * currentContentsScale;
 
     dpy_set_ui_info(dcl.con, &info, TRUE);
+    NSLog(@"set_ui_info: %d x %d", info.width, info.height);
 }
 
 - (void) updateUIInfo
@@ -673,7 +683,7 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 
     if (w != screen.width || h != screen.height) {
         // Resize before we trigger the redraw, or we'll redraw at the wrong size
-        COCOA_DEBUG("switchSurface: new size %d x %d\n", w, h);
+        COCOA_DEBUG("switchSurface: new size %d x %d / %.0fx\n", w, h, currentContentsScale);
         screen.width = w;
         screen.height = h;
         [self resizeWindow];
@@ -1138,6 +1148,10 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     else
         [[self window] setTitle:@"QEMU - (Press  " UC_CTRL_KEY " " UC_ALT_KEY " G  to release Mouse)"];
     [self hideCursor];
+    normalWindow.titleVisibility = NSWindowTitleHidden;
+    [[normalWindow standardWindowButton:NSWindowCloseButton] setHidden:YES];
+    [[normalWindow standardWindowButton:NSWindowMiniaturizeButton] setHidden:YES];
+    [[normalWindow standardWindowButton:NSWindowZoomButton] setHidden:YES];
     CGAssociateMouseAndMouseCursorPosition(isAbsoluteEnabled);
     isMouseGrabbed = TRUE; // while isMouseGrabbed = TRUE, QemuCocoaApp sends all events to [cocoaView handleEvent:]
 }
@@ -1151,6 +1165,10 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     else
         [[self window] setTitle:@"QEMU"];
     [self unhideCursor];
+    normalWindow.titleVisibility = NSWindowTitleVisible;
+    [[normalWindow standardWindowButton:NSWindowCloseButton] setHidden:NO];
+    [[normalWindow standardWindowButton:NSWindowMiniaturizeButton] setHidden:NO];
+    [[normalWindow standardWindowButton:NSWindowZoomButton] setHidden:NO];
     CGAssociateMouseAndMouseCursorPosition(TRUE);
     isMouseGrabbed = FALSE;
     [self raiseAllButtons];
@@ -1279,15 +1297,6 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
                                           height:h
                                           stride:stride];
             
-        // if (cursorVisible && cursorImage && NSIntersectsRect(rect, cursorRect)) {
-            /*
-            CGContextDrawImage (viewContextRef, cursorRect, cursorImage);
-            */
-        //}
-        /*
-        CGImageRelease (imageRef);
-        CGDataProviderRelease(dataProviderRef);
-        */
         [self renderOnEvent];
     }
 }
@@ -1309,11 +1318,12 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     });
 }
 
-- (void)resizeDrawable:(CGFloat)scaleFactor
+//- (void)resizeDrawable:(CGFloat)scaleFactor
+- (void)resizeDrawable
 {
-    CGSize newSize = self.bounds.size;
-    newSize.width *= scaleFactor;
-    newSize.height *= scaleFactor;
+    CGSize newSize = CGSizeMake(screen.width, screen.height);
+    //newSize.width *= scaleFactor;
+    //newSize.height *= scaleFactor;
 
     if(newSize.width <= 0 || newSize.width <= 0)
     {
@@ -1336,36 +1346,10 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 
 - (void) updateUIInfo
 {
-    NSSize frameSize;
-    QemuUIInfo info;
-
-    if (!qemu_console_is_graphic(dcl.con)) {
-        return;
-    }
-
-    currentContentsScale = _metalLayer.contentsScale;
-    if ([self window]) {
-        NSDictionary *description = [[[self window] screen] deviceDescription];
-        CGDirectDisplayID display = [[description objectForKey:@"NSScreenNumber"] unsignedIntValue];
-        NSSize screenSize = [[[self window] screen] frame].size;
-        CGSize screenPhysicalSize = CGDisplayScreenSize(display);
-
-        frameSize = isFullscreen ? screenSize : [self frame].size;
-        info.width_mm = frameSize.width / screenSize.width / currentContentsScale * screenPhysicalSize.width;
-        info.height_mm = frameSize.height / screenSize.height / currentContentsScale * screenPhysicalSize.height;
-    } else {
-        frameSize = [self frame].size;
-        info.width_mm = 0;
-        info.height_mm = 0;
-    }
-
-
-    info.xoff = 0;
-    info.yoff = 0;
-    info.width = frameSize.width * currentContentsScale;
-    info.height = frameSize.height * currentContentsScale;
-
-    dpy_set_ui_info(dcl.con, &info);
+    [super updateUIInfo];
+    //[self resizeDrawable:self.window.screen.backingScaleFactor];
+    //[self updateMetalAtX:0 y:0 width:screen.width height:screen.height];
+    //[self renderOnEvent];
 }
 
 
@@ -1378,75 +1362,46 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     //defaultDrawableSize.width *= self.layer.contentsScale;
     //defaultDrawableSize.height *= self.layer.contentsScale;
 
-    [self resizeDrawable:self.window.screen.backingScaleFactor];
+    //[self resizeDrawable:self.window.screen.backingScaleFactor];
+    [self resizeDrawable];
+    [self renderOnEvent];
 }
 
 - (void)viewDidChangeBackingProperties
 {
     [super viewDidChangeBackingProperties];
-    [self resizeDrawable:self.window.screen.backingScaleFactor];
+    //[self resizeDrawable:self.window.screen.backingScaleFactor];
+    [self resizeDrawable];
+    [self renderOnEvent];
 }
 
 - (void)setFrameSize:(NSSize)size
 {
     [super setFrameSize:size];
-    [self resizeDrawable:self.window.screen.backingScaleFactor];
+
+    if ([self.window isEqual:normalWindow] && !isHostResizing) {
+        [self resizeDrawable];
+        //  [self resizeDrawable:self.window.screen.backingScaleFactor];
+        [self renderOnEvent];
+    }
 }
 
 - (void)setBoundsSize:(NSSize)size
 {
     [super setBoundsSize:size];
-    [self resizeDrawable:self.window.screen.backingScaleFactor];
+    //[self resizeDrawable:self.window.screen.backingScaleFactor];
+    [self resizeDrawable];
+    [self renderOnEvent];
 }
 
 - (void) switchSurface:(pixman_image_t *)image
 {
     COCOA_DEBUG("QemuMetalView: switchSurface\n");
 
+    NSLog(@"switchSurface:");
+    [super switchSurface:image];
     int w = pixman_image_get_width(image);
     int h = pixman_image_get_height(image);
-    NSLog(@"QemuMetalView: switchSurface: %d x %d", w, h);
-    /* cdx == 0 means this is our very first surface, in which case we need
-     * to recalculate the content dimensions even if it happens to be the size
-     * of the initial empty window.
-     */
-    bool isResize = (w != screen.width || h != screen.height || cdx == 0.0);
-
-    int oldh = screen.height;
-    if (isResize) {
-        // Resize before we trigger the redraw, or we'll redraw at the wrong size
-        COCOA_DEBUG("switchSurface: new size %d x %d\n", w, h);
-        screen.width = w;
-        screen.height = h;
-        [self setContentDimensions];
-        [self setFrame:NSMakeRect(cx, cy, cw, ch)];
-    }
-
-    // update screenBuffer
-    if (pixman_image) {
-        pixman_image_unref(pixman_image);
-    }
-
-    pixman_image = image;
-
-    // update windows
-
-    CGFloat dh = h - oldh;
-    NSLog(@"metalView: oldh: %d newh: %d; scale: %.1f", oldh, h, currentContentsScale);
-    NSRect f = NSMakeRect(
-        [normalWindow frame].origin.x,
-        [normalWindow frame].origin.y - dh / currentContentsScale,
-        w / currentContentsScale,
-        [normalWindow frame].size.height + dh / currentContentsScale);
-    if (isFullscreen) {
-        //[[fullScreenWindow contentView] setFrame:[[NSScreen mainScreen] frame]];
-        [normalWindow setFrame:f display:NO animate:NO];
-    } else {
-        if (qemu_name)
-            [normalWindow setTitle:[NSString stringWithFormat:@"QEMU %s", qemu_name]];
-        [normalWindow setFrame:f display:YES animate:NO];
-    }
-
     CGSize drawableSize = CGSizeMake(w, h);
 
     @synchronized(_metalLayer) {
@@ -1454,13 +1409,6 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     }
     [self updateMetalAtX:0 y:0 width:w height: h];
 
-
-    /*
-     * XXX: avoid this temporarily
-    if (isResize) {
-        [metalWindow center];
-    }
-    */
 }
 
 - (CAMetalLayer *)metalLayer { return _metalLayer; }
@@ -1591,7 +1539,7 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 }
 
 - (NSApplicationTerminateReply)applicationShouldTerminate:
-                                                         (NSApplication *)sender
+(NSApplication *)sender
 {
     COCOA_DEBUG("QemuCocoaAppController: applicationShouldTerminate\n");
     return [self verifyQuit];
@@ -1613,12 +1561,43 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     [cocoaView ungrabMouse];
 }
 
+/*
 - (void)windowDidResize:(NSNotification *)notification
 {
     [cocoaView updateBounds];
     [cocoaView updateUIInfo];
 }
+*/
 
+- (void)windowWillStartLiveResize:(NSNotification *)notification
+{
+    NSLog(@"windowWillStartLiveResize");
+    [cocoaView setHostResizing:YES];
+}
+
+- (void)windowDidEndLiveResize:(NSNotification *)notification
+{
+    NSLog(@"windowDidEndLiveResize");
+    [cocoaView setHostResizing:NO];
+    NSWindow *window = notification.object;
+    if ([window.contentView isEqual:cocoaView]) {
+        [cocoaView updateBounds];
+	[cocoaView frameUpdated];
+    }
+}
+
+- (void)windowWillMiniaturize:(NSNotification *)notification
+{
+    [cocoaView ungrabMouse];
+}
+/*
+   - (void)windowDidDeminiaturize:(NSNotification *)notification
+   {
+   if ([notification.object isEqual:fullScreenWindow]) {
+   [cocoaView grabMouse];
+   }
+   }
+   */
 /* Called when the user clicks on a window's close button */
 - (BOOL)windowShouldClose:(id)sender
 {
@@ -1683,7 +1662,7 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
         full_file_path = [[NSBundle mainBundle] executablePath];
         full_file_path = [full_file_path stringByDeletingLastPathComponent];
         full_file_path = [NSString stringWithFormat: @"%@/%@%@", full_file_path,
-                          path_array[index], filename];
+                       path_array[index], filename];
         full_file_url = [NSURL fileURLWithPath: full_file_path
                                    isDirectory: false];
         if ([[NSWorkspace sharedWorkspace] openURL: full_file_url] == YES) {
