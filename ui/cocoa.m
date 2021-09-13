@@ -1148,12 +1148,28 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     else
         [[self window] setTitle:@"QEMU - (Press  " UC_CTRL_KEY " " UC_ALT_KEY " G  to release Mouse)"];
     [self hideCursor];
-    normalWindow.titleVisibility = NSWindowTitleHidden;
     [[normalWindow standardWindowButton:NSWindowCloseButton] setHidden:YES];
     [[normalWindow standardWindowButton:NSWindowMiniaturizeButton] setHidden:YES];
     [[normalWindow standardWindowButton:NSWindowZoomButton] setHidden:YES];
     CGAssociateMouseAndMouseCursorPosition(isAbsoluteEnabled);
     isMouseGrabbed = TRUE; // while isMouseGrabbed = TRUE, QemuCocoaApp sends all events to [cocoaView handleEvent:]
+}
+
+- (void) showTitleMomentarily 
+{
+    normalWindow.titleVisibility = NSWindowTitleVisible;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC),
+        dispatch_get_main_queue(),
+        ^{
+            if (normalWindow.isKeyWindow) {
+                normalWindow.titleVisibility = NSWindowTitleHidden;
+                NSWindowButton buttonTypes[] = {NSWindowCloseButton, NSWindowMiniaturizeButton, NSWindowZoomButton};
+                int idx;
+                for (idx = 0; idx < 3; idx ++) {
+                    [normalWindow standardWindowButton:buttonTypes[idx]].hidden = YES;
+                }
+            }
+        });
 }
 
 - (void) ungrabMouse
@@ -1165,7 +1181,6 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     else
         [[self window] setTitle:@"QEMU"];
     [self unhideCursor];
-    normalWindow.titleVisibility = NSWindowTitleVisible;
     [[normalWindow standardWindowButton:NSWindowCloseButton] setHidden:NO];
     [[normalWindow standardWindowButton:NSWindowMiniaturizeButton] setHidden:NO];
     [[normalWindow standardWindowButton:NSWindowZoomButton] setHidden:NO];
@@ -1545,6 +1560,29 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     return [self verifyQuit];
 }
 
+- (void)windowDidBecomeKey:(NSNotification *)note
+{
+    if ([note.object isEqual:normalWindow]) {
+        [cocoaView showTitleMomentarily];
+    }
+}
+
+- (void)windowDidResignKey:(NSNotification *)note
+{
+    if ([note.object isEqual:normalWindow]) {
+        normalWindow.titleVisibility = NSWindowTitleVisible;
+        NSWindowButton buttonTypes[] = {NSWindowCloseButton, NSWindowMiniaturizeButton, NSWindowZoomButton};
+        int idx;
+        for (idx = 0; idx < 3; idx ++) {
+            [normalWindow standardWindowButton:buttonTypes[idx]].hidden = NO;
+        }
+    }
+    /*
+    if (isFullscreen && [note.object isEqual:normalWindow]) {
+        [cocoaView ungrabMouse];
+    }
+    */
+}
 - (void)windowDidChangeScreen:(NSNotification *)notification
 {
     [cocoaView updateUIInfo];
