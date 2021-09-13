@@ -347,6 +347,8 @@ static void handleAnyDeviceErrors(Error * err)
  */
 - (BOOL) isMouseGrabbed;
 - (BOOL) isAbsoluteEnabled;
+// Show title and standard window buttons for a short period of time and then hide.
+- (void) showTitleMomentarily;
 - (float) cdx;
 - (float) cdy;
 - (float) currentContentsScale;
@@ -660,9 +662,9 @@ QemuMetalRenderer *renderer;
     NSLog(@"cocoaView: oldh %d, newh: %d / %.0f", oldh, h, currentContentsScale); 
     NSRect f = NSMakeRect(
         [normalWindow frame].origin.x,
-        [normalWindow frame].origin.y - dh / currentContentsScale,
+        [normalWindow frame].origin.y, // - dh / currentContentsScale,
         w / currentContentsScale,
-        [normalWindow frame].size.height + dh / currentContentsScale);
+        h / currentContentsScale); // [normalWindow frame].size.height + dh / currentContentsScale);
     if (isFullscreen) {
         [[fullScreenWindow contentView] setFrame:[[NSScreen mainScreen] frame]];
         [normalWindow setFrame:f display:NO animate:NO];
@@ -1118,7 +1120,6 @@ QemuMetalRenderer *renderer;
             [normalWindow setTitle:@"QEMU - (Press ctrl + alt + g to release Mouse)"];
     }
     [self hideCursor];
-    normalWindow.titleVisibility = NSWindowTitleHidden;
     [[normalWindow standardWindowButton:NSWindowCloseButton] setHidden:YES];
     [[normalWindow standardWindowButton:NSWindowMiniaturizeButton] setHidden:YES];
     [[normalWindow standardWindowButton:NSWindowZoomButton] setHidden:YES];
@@ -1126,18 +1127,35 @@ QemuMetalRenderer *renderer;
     isMouseGrabbed = TRUE; // while isMouseGrabbed = TRUE, QemuCocoaApp sends all events to [cocoaView handleEvent:]
 }
 
+- (void) showTitleMomentarily 
+{
+    normalWindow.titleVisibility = NSWindowTitleVisible;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC),
+        dispatch_get_main_queue(),
+        ^{
+            if (normalWindow.isKeyWindow) {
+                normalWindow.titleVisibility = NSWindowTitleHidden;
+                NSWindowButton buttonTypes[] = {NSWindowCloseButton, NSWindowMiniaturizeButton, NSWindowZoomButton};
+                int idx;
+                for (idx = 0; idx < 3; idx ++) {
+                    [normalWindow standardWindowButton:buttonTypes[idx]].hidden = YES;
+                }
+            }
+        });
+}
+
 - (void) ungrabMouse
 {
     COCOA_DEBUG("QemuCocoaView: ungrabMouse\n");
 
     if (!isFullscreen) {
+        [self showTitleMomentarily];
         if (qemu_name)
             [normalWindow setTitle:[NSString stringWithFormat:@"QEMU %s", qemu_name]];
         else
             [normalWindow setTitle:@"QEMU"];
     }
     [self unhideCursor];
-    normalWindow.titleVisibility = NSWindowTitleVisible;
     [[normalWindow standardWindowButton:NSWindowCloseButton] setHidden:NO];
     [[normalWindow standardWindowButton:NSWindowMiniaturizeButton] setHidden:NO];
     [[normalWindow standardWindowButton:NSWindowZoomButton] setHidden:NO];
@@ -1504,6 +1522,29 @@ QemuMetalRenderer *renderer;
     return [self verifyQuit];
 }
 
+- (void)windowDidBecomeKey:(NSNotification *)note
+{
+    if ([note.object isEqual:normalWindow]) {
+        [cocoaView showTitleMomentarily];
+    }
+}
+
+- (void)windowDidResignKey:(NSNotification *)note
+{
+    if ([note.object isEqual:normalWindow]) {
+        normalWindow.titleVisibility = NSWindowTitleVisible;
+        NSWindowButton buttonTypes[] = {NSWindowCloseButton, NSWindowMiniaturizeButton, NSWindowZoomButton};
+        int idx;
+        for (idx = 0; idx < 3; idx ++) {
+            [normalWindow standardWindowButton:buttonTypes[idx]].hidden = NO;
+        }
+    }
+    /*
+    if (isFullscreen && [note.object isEqual:normalWindow]) {
+        [cocoaView ungrabMouse];
+    }
+    */
+}
 - (void)windowDidChangeScreen:(NSNotification *)notification
 {
     [cocoaView updateUIInfo];
