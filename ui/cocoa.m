@@ -62,7 +62,7 @@
 #define NSControlStateValueOff NSOffState
 #endif
 
-// #define DEBUG
+//#define DEBUG
 
 #ifdef DEBUG
 #define COCOA_DEBUG(...)  { (void) fprintf (stdout, __VA_ARGS__); }
@@ -95,7 +95,6 @@ static void cocoa_mouse_set(DisplayChangeListener *dcl,
 static void cocoa_cursor_define(DisplayChangeListener *dcl, QEMUCursor *c);
 
 static NSWindow *normalWindow, *about_window;
-// static NSWindow *metalWindow;
 static const DisplayChangeListenerOps dcl_ops = {
     .dpy_name          = "cocoa",
     .dpy_gfx_update = cocoa_update,
@@ -411,9 +410,7 @@ QemuMetalRenderer *renderer;
 - (void)setHostResizing:(BOOL)resizing
 {
     isHostResizing = resizing;
-
 }
-
 
 - (BOOL) isOpaque
 {
@@ -1342,25 +1339,16 @@ QemuMetalRenderer *renderer;
     }
 }
 
+/*
 - (void) updateUIInfo
 {
     [super updateUIInfo];
-    //[self resizeDrawable:self.window.screen.backingScaleFactor];
-    //[self updateMetalAtX:0 y:0 width:screen.width height:screen.height];
-    //[self renderOnEvent];
 }
-
+*/
 
 - (void)viewDidMoveToWindow
 {
     [super viewDidMoveToWindow];
-    
-    NSLog(@"metalView: viewDidMoveToWindow");
-    //CGSize defaultDrawableSize = self.bounds.size;
-    //defaultDrawableSize.width *= self.layer.contentsScale;
-    //defaultDrawableSize.height *= self.layer.contentsScale;
-
-    //[self resizeDrawable:self.window.screen.backingScaleFactor];
     [self resizeDrawable];
     [self renderOnEvent];
 }
@@ -1368,7 +1356,6 @@ QemuMetalRenderer *renderer;
 - (void)viewDidChangeBackingProperties
 {
     [super viewDidChangeBackingProperties];
-    //[self resizeDrawable:self.window.screen.backingScaleFactor];
     [self resizeDrawable];
     [self renderOnEvent];
 }
@@ -1379,7 +1366,6 @@ QemuMetalRenderer *renderer;
 
     if ([self.window isEqual:normalWindow] && !isHostResizing) {
         [self resizeDrawable];
-        //  [self resizeDrawable:self.window.screen.backingScaleFactor];
         [self renderOnEvent];
     }
 }
@@ -1387,7 +1373,6 @@ QemuMetalRenderer *renderer;
 - (void)setBoundsSize:(NSSize)size
 {
     [super setBoundsSize:size];
-    //[self resizeDrawable:self.window.screen.backingScaleFactor];
     [self resizeDrawable];
     [self renderOnEvent];
 }
@@ -1543,8 +1528,7 @@ QemuMetalRenderer *renderer;
     return YES;
 }
 
-- (NSApplicationTerminateReply)applicationShouldTerminate:
-(NSApplication *)sender
+- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)sender
 {
     COCOA_DEBUG("QemuCocoaAppController: applicationShouldTerminate\n");
     return [self verifyQuit];
@@ -1562,25 +1546,11 @@ QemuMetalRenderer *renderer;
     if ([note.object isEqual:normalWindow]) {
         [cocoaView showTitle];
     }
-    /*
-    if (isFullscreen && [note.object isEqual:normalWindow]) {
-        [cocoaView ungrabMouse];
-    }
-    */
 }
 - (void)windowDidChangeScreen:(NSNotification *)notification
 {
     [cocoaView updateUIInfo];
 }
-
-/*
-- (void)windowDidResize:(NSNotification *)notification
-{
-    NSWindow *window = notification.object;
-    if ([window.contentView isEqual:cocoaView] && !window.inLiveResize) {
-    }
-}
-*/
 
 - (void)windowWillMove:(NSNotification *)note
 {
@@ -1610,14 +1580,7 @@ QemuMetalRenderer *renderer;
 {
     [cocoaView ungrabMouse];
 }
-/*
-   - (void)windowDidDeminiaturize:(NSNotification *)notification
-   {
-   if ([notification.object isEqual:fullScreenWindow]) {
-   [cocoaView grabMouse];
-   }
-   }
-   */
+
 /* Called when the user clicks on a window's close button */
 - (BOOL)windowShouldClose:(id)sender
 {
@@ -1668,7 +1631,7 @@ QemuMetalRenderer *renderer;
         full_file_path = [[NSBundle mainBundle] executablePath];
         full_file_path = [full_file_path stringByDeletingLastPathComponent];
         full_file_path = [NSString stringWithFormat: @"%@/%@%@", full_file_path,
-                       path_array[index], filename];
+                          path_array[index], filename];
         full_file_url = [NSURL fileURLWithPath: full_file_path
                                    isDirectory: false];
         if ([[NSWorkspace sharedWorkspace] openURL: full_file_url] == YES) {
@@ -1709,8 +1672,8 @@ QemuMetalRenderer *renderer;
 - (void)pauseQEMU:(id)sender
 {
     with_iothread_lock(^{
-            qmp_stop(NULL);
-            });
+        qmp_stop(NULL);
+    });
     [sender setEnabled: NO];
     [[[sender menu] itemWithTitle: @"Resume"] setEnabled: YES];
     [self displayPause];
@@ -1720,8 +1683,8 @@ QemuMetalRenderer *renderer;
 - (void)resumeQEMU:(id) sender
 {
     with_iothread_lock(^{
-            qmp_cont(NULL);
-            });
+        qmp_cont(NULL);
+    });
     [sender setEnabled: NO];
     [[[sender menu] itemWithTitle: @"Pause"] setEnabled: YES];
     [self removePause];
@@ -1750,16 +1713,16 @@ QemuMetalRenderer *renderer;
 - (void)restartQEMU:(id)sender
 {
     with_iothread_lock(^{
-            qmp_system_reset(NULL);
-            });
+        qmp_system_reset(NULL);
+    });
 }
 
 /* Powers down QEMU */
 - (void)powerDownQEMU:(id)sender
 {
     with_iothread_lock(^{
-            qmp_system_powerdown(NULL);
-            });
+        qmp_system_powerdown(NULL);
+    });
 }
 
 /* Ejects the media.
@@ -1777,8 +1740,8 @@ QemuMetalRenderer *renderer;
 
     __block Error *err = NULL;
     with_iothread_lock(^{
-            qmp_eject(true, [drive cStringUsingEncoding: NSASCIIStringEncoding],
-                    false, NULL, false, false, &err);
+        qmp_eject(true, [drive cStringUsingEncoding: NSASCIIStringEncoding],
+                  false, NULL, false, false, &err);
     });
     handleAnyDeviceErrors(err);
 }
