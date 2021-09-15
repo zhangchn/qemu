@@ -26,6 +26,10 @@ softmmu_ss.add(when: 'CONFIG_LINUX', if_true: files(
 ))
 softmmu_ss.add(when: cocoa, if_true: files('cocoa.m'))
 softmmu_ss.add(when: metalkit, if_true: [files('metal.m'), metalkit, metal, quartzcore])
+# if config_host.has_key('CONFIG_COCOA')
+if cocoa.found()
+  install_data('metal_shader.metal', install_dir: qemu_datadir)
+endif
 
 vnc_ss = ss.source_set()
 vnc_ss.add(files(
@@ -177,7 +181,4 @@ if have_system
   install_data('qemu.desktop', install_dir: qemu_desktopdir)
 endif
 
-if cocoa.found()
-  install_data('metal_shader.metal', install_dir: get_option('datadir') / get_option('qemu_suffix'))
-endif
 modules += {'ui': ui_modules}
