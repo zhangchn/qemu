@@ -1149,7 +1149,6 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     isMouseGrabbed = TRUE; // while isMouseGrabbed = TRUE, QemuCocoaApp sends all events to [cocoaView handleEvent:]
 }
 
-
 - (void) showTitle
 {
     NSWindowButton buttonTypes[] = {NSWindowCloseButton, NSWindowMiniaturizeButton, NSWindowZoomButton};
@@ -1186,7 +1185,11 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     [self showTitle];
     [hideTitleTimer invalidate];
 
-    hideTitleTimer = [NSTimer scheduledTimerWithTimeInterval:3.0 target:self selector:@selector(hideTitleWithDelay:) userInfo:nil repeats:NO];
+    hideTitleTimer = [NSTimer scheduledTimerWithTimeInterval:3.0
+                                                      target:self
+                                                    selector:@selector(hideTitleWithDelay:)
+                                                    userInfo:nil
+                                                     repeats:NO];
 }
 
 - (void) ungrabMouse
@@ -1335,20 +1338,15 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 
 - (void)renderOnEvent
 {
-    //[_delegate renderToMetalLayer:_metalLayer];
     dispatch_queue_t globalQueue = dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0);
     dispatch_async(globalQueue, ^(){
         [self render];
     });
 }
 
-//- (void)resizeDrawable:(CGFloat)scaleFactor
 - (void)resizeDrawable
 {
     CGSize newSize = CGSizeMake(screen.width, screen.height);
-    //newSize.width *= scaleFactor;
-    //newSize.height *= scaleFactor;
-
     if(newSize.width <= 0 || newSize.width <= 0)
     {
         return;
@@ -1367,13 +1365,6 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
         [_delegate drawableResize:newSize];
     }
 }
-
-/*
-- (void) updateUIInfo
-{
-    [super updateUIInfo];
-}
-*/
 
 - (void)viewDidMoveToWindow
 {
@@ -1410,7 +1401,6 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 {
     COCOA_DEBUG("QemuMetalView: switchSurface\n");
 
-    NSLog(@"switchSurface:");
     [super switchSurface:image];
     int w = pixman_image_get_width(image);
     int h = pixman_image_get_height(image);
@@ -1427,7 +1417,6 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 
 - (void)setDelegate:(id<QemuMetalViewDelegate>)delegate { _delegate = delegate; }
 @end
-
 
 /*
  ------------------------------------------------------
@@ -1596,20 +1585,17 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 - (void)windowWillMove:(NSNotification *)note
 {
     if ([note.object isEqual:normalWindow]) {
-        NSLog(@"begin moving");
         [cocoaView setWindowMoving:YES];
     }
 }
 
 - (void)windowWillStartLiveResize:(NSNotification *)notification
 {
-    NSLog(@"windowWillStartLiveResize");
     [cocoaView setHostResizing:YES];
 }
 
 - (void)windowDidEndLiveResize:(NSNotification *)notification
 {
-    NSLog(@"windowDidEndLiveResize");
     [cocoaView setHostResizing:NO];
     NSWindow *window = notification.object;
     if ([window.contentView isEqual:cocoaView]) {
@@ -2422,9 +2408,7 @@ static void cocoa_mouse_set(DisplayChangeListener *dcl,
         [cocoaView setCursorRect:rect];
         [cocoaView setCursorVisible:visible ? YES : NO];
         // Mark new cursor rect as dirty
-
         [cocoaView setNeedsDisplayInRect:rect];
-        
     });
     [pool release];
 #endif // COCOA_METAL_VIEW
