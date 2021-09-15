@@ -196,4 +196,7 @@ if have_system
   install_data('qemu.desktop', install_dir: qemu_desktopdir)
 endif
 
+if cocoa.found()
+  install_data('metal_shader.metal', install_dir: get_option('datadir') / get_option('qemu_suffix'))
+endif
 modules += {'ui': ui_modules}

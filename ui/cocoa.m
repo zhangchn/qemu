@@ -422,7 +422,6 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 - (void)setHostResizing:(BOOL)resizing
 {
     isHostResizing = resizing;
-
 }
 
 - (float) currentContentsScale {
@@ -1369,25 +1368,16 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     }
 }
 
+/*
 - (void) updateUIInfo
 {
     [super updateUIInfo];
-    //[self resizeDrawable:self.window.screen.backingScaleFactor];
-    //[self updateMetalAtX:0 y:0 width:screen.width height:screen.height];
-    //[self renderOnEvent];
 }
-
+*/
 
 - (void)viewDidMoveToWindow
 {
     [super viewDidMoveToWindow];
-    
-    NSLog(@"metalView: viewDidMoveToWindow");
-    //CGSize defaultDrawableSize = self.bounds.size;
-    //defaultDrawableSize.width *= self.layer.contentsScale;
-    //defaultDrawableSize.height *= self.layer.contentsScale;
-
-    //[self resizeDrawable:self.window.screen.backingScaleFactor];
     [self resizeDrawable];
     [self renderOnEvent];
 }
@@ -1395,7 +1385,6 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 - (void)viewDidChangeBackingProperties
 {
     [super viewDidChangeBackingProperties];
-    //[self resizeDrawable:self.window.screen.backingScaleFactor];
     [self resizeDrawable];
     [self renderOnEvent];
 }
@@ -1406,7 +1395,6 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 
     if ([self.window isEqual:normalWindow] && !isHostResizing) {
         [self resizeDrawable];
-        //  [self resizeDrawable:self.window.screen.backingScaleFactor];
         [self renderOnEvent];
     }
 }
@@ -1414,7 +1402,6 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 - (void)setBoundsSize:(NSSize)size
 {
     [super setBoundsSize:size];
-    //[self resizeDrawable:self.window.screen.backingScaleFactor];
     [self resizeDrawable];
     [self renderOnEvent];
 }
@@ -1563,8 +1550,7 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     return YES;
 }
 
-- (NSApplicationTerminateReply)applicationShouldTerminate:
-(NSApplication *)sender
+- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)sender
 {
     COCOA_DEBUG("QemuCocoaAppController: applicationShouldTerminate\n");
     return [self verifyQuit];
@@ -1582,11 +1568,6 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     if ([note.object isEqual:normalWindow]) {
         [cocoaView showTitle];
     }
-    /*
-    if (isFullscreen && [note.object isEqual:normalWindow]) {
-        [cocoaView ungrabMouse];
-    }
-    */
 }
 - (void)windowDidChangeScreen:(NSNotification *)notification
 {
@@ -1641,14 +1622,7 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 {
     [cocoaView ungrabMouse];
 }
-/*
-   - (void)windowDidDeminiaturize:(NSNotification *)notification
-   {
-   if ([notification.object isEqual:fullScreenWindow]) {
-   [cocoaView grabMouse];
-   }
-   }
-   */
+
 /* Called when the user clicks on a window's close button */
 - (BOOL)windowShouldClose:(id)sender
 {
@@ -1713,7 +1687,7 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
         full_file_path = [[NSBundle mainBundle] executablePath];
         full_file_path = [full_file_path stringByDeletingLastPathComponent];
         full_file_path = [NSString stringWithFormat: @"%@/%@%@", full_file_path,
-                       path_array[index], filename];
+                          path_array[index], filename];
         full_file_url = [NSURL fileURLWithPath: full_file_path
                                    isDirectory: false];
         if ([[NSWorkspace sharedWorkspace] openURL: full_file_url] == YES) {
