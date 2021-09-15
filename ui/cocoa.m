@@ -324,6 +324,8 @@ static void handleAnyDeviceErrors(Error * err)
     BOOL cursorVisible;
     float currentContentsScale;
     BOOL isHostResizing;
+    BOOL windowIsMoving;
+    NSTimer *hideTitleTimer;
 }
 - (void) switchSurface:(pixman_image_t *)image;
 - (void) grabMouse;
@@ -336,18 +338,9 @@ static void handleAnyDeviceErrors(Error * err)
 - (BOOL) isMouseGrabbed;
 - (QEMUScreen) gscreen;
 - (void) raiseAllKeys;
-- (void)setHostResizing:(BOOL)resizing;
+- (void) setHostResizing:(BOOL)resizing;
+- (float) currentContentsScale;
 @end
-/*
-@protocol QemuMetalViewDelegate <NSObject>
-
-- (void)drawableResize:(CGSize)size;
-
-- (void)renderToMetalLayer:(nonnull CAMetalLayer *)metalLayer;
-
-@end
-*/
-
 
 @interface QemuMetalView: QemuCocoaView <CALayerDelegate>
 {
@@ -406,6 +399,7 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
         [self setClipsToBounds:YES];
 #endif
 
+        hideTitleTimer = nil;
     }
     return self;
 }
@@ -431,6 +425,9 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 
 }
 
+- (float) currentContentsScale {
+    return currentContentsScale;
+}
 
 - (BOOL) isOpaque
 {
@@ -1148,28 +1145,49 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     else
         [[self window] setTitle:@"QEMU - (Press  " UC_CTRL_KEY " " UC_ALT_KEY " G  to release Mouse)"];
     [self hideCursor];
-    [[normalWindow standardWindowButton:NSWindowCloseButton] setHidden:YES];
-    [[normalWindow standardWindowButton:NSWindowMiniaturizeButton] setHidden:YES];
-    [[normalWindow standardWindowButton:NSWindowZoomButton] setHidden:YES];
     CGAssociateMouseAndMouseCursorPosition(isAbsoluteEnabled);
+    [self showTitleMomentarily];
     isMouseGrabbed = TRUE; // while isMouseGrabbed = TRUE, QemuCocoaApp sends all events to [cocoaView handleEvent:]
+}
+
+
+- (void) showTitle
+{
+    NSWindowButton buttonTypes[] = {NSWindowCloseButton, NSWindowMiniaturizeButton, NSWindowZoomButton};
+    int idx;
+    for (idx = 0; idx < 3; idx ++) {
+        [normalWindow standardWindowButton:buttonTypes[idx]].hidden = NO;
+    }
+    normalWindow.titleVisibility = NSWindowTitleVisible;
+}
+
+- (void) hideTitle
+{
+    normalWindow.titleVisibility = NSWindowTitleHidden;
+    NSWindowButton buttonTypes[] = {NSWindowCloseButton, NSWindowMiniaturizeButton, NSWindowZoomButton};
+    int idx;
+    for (idx = 0; idx < 3; idx ++) {
+        [normalWindow standardWindowButton:buttonTypes[idx]].hidden = YES;
+    }
+}
+
+- (void) hideTitleWithDelay:(NSTimer *)timer
+{
+    if (normalWindow.isKeyWindow && !windowIsMoving) {
+        [self hideTitle];
+        hideTitleTimer = nil;
+    } else {
+        [timer invalidate];
+        [self showTitleMomentarily];
+    }
 }
 
 - (void) showTitleMomentarily 
 {
-    normalWindow.titleVisibility = NSWindowTitleVisible;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC),
-        dispatch_get_main_queue(),
-        ^{
-            if (normalWindow.isKeyWindow) {
-                normalWindow.titleVisibility = NSWindowTitleHidden;
-                NSWindowButton buttonTypes[] = {NSWindowCloseButton, NSWindowMiniaturizeButton, NSWindowZoomButton};
-                int idx;
-                for (idx = 0; idx < 3; idx ++) {
-                    [normalWindow standardWindowButton:buttonTypes[idx]].hidden = YES;
-                }
-            }
-        });
+    [self showTitle];
+    [hideTitleTimer invalidate];
+
+    hideTitleTimer = [NSTimer scheduledTimerWithTimeInterval:3.0 target:self selector:@selector(hideTitleWithDelay:) userInfo:nil repeats:NO];
 }
 
 - (void) ungrabMouse
@@ -1181,9 +1199,7 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     else
         [[self window] setTitle:@"QEMU"];
     [self unhideCursor];
-    [[normalWindow standardWindowButton:NSWindowCloseButton] setHidden:NO];
-    [[normalWindow standardWindowButton:NSWindowMiniaturizeButton] setHidden:NO];
-    [[normalWindow standardWindowButton:NSWindowZoomButton] setHidden:NO];
+    [self showTitleMomentarily];
     CGAssociateMouseAndMouseCursorPosition(TRUE);
     isMouseGrabbed = FALSE;
     [self raiseAllButtons];
@@ -1223,18 +1239,11 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 }
 - (BOOL) isCursorVisible {return cursorVisible;}
 - (void) setCursorVisible:(BOOL)visible {cursorVisible = visible;}
-
-- (CGRect) convertRectFromQemuScreen:(CGRect)rect
-{
-    CGRect viewRect = rect;
-    if (cdx != 0 && cdy != 0) {
-        viewRect.origin.x /= cdx;
-        viewRect.origin.y /= cdy;
-        viewRect.size.width /= cdx;
-        viewRect.size.height /= cdy;
-    }
-    return viewRect;
+- (void) setWindowMoving:(BOOL)moving {
+    windowIsMoving = moving;
+    [self showTitleMomentarily];
 }
+
 /*
  * Makes the target think all down keys are being released.
  * This prevents a stuck key problem, since we will not see
@@ -1278,6 +1287,7 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     }
     return self;
 }
+
 
 - (CALayer *)makeBackingLayer
 {
@@ -1567,15 +1577,10 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     }
 }
 
-- (void)windowDidResignKey:(NSNotification *)note
+- (void)windowWillResignKey:(NSNotification *)note
 {
     if ([note.object isEqual:normalWindow]) {
-        normalWindow.titleVisibility = NSWindowTitleVisible;
-        NSWindowButton buttonTypes[] = {NSWindowCloseButton, NSWindowMiniaturizeButton, NSWindowZoomButton};
-        int idx;
-        for (idx = 0; idx < 3; idx ++) {
-            [normalWindow standardWindowButton:buttonTypes[idx]].hidden = NO;
-        }
+        [cocoaView showTitle];
     }
     /*
     if (isFullscreen && [note.object isEqual:normalWindow]) {
@@ -1606,6 +1611,14 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     [cocoaView updateUIInfo];
 }
 */
+
+- (void)windowWillMove:(NSNotification *)note
+{
+    if ([note.object isEqual:normalWindow]) {
+        NSLog(@"begin moving");
+        [cocoaView setWindowMoving:YES];
+    }
+}
 
 - (void)windowWillStartLiveResize:(NSNotification *)notification
 {
@@ -2315,18 +2328,16 @@ static void cocoa_update(DisplayChangeListener *dcl,
     COCOA_DEBUG("qemu_cocoa: cocoa_update\n");
 
     dispatch_async(dispatch_get_main_queue(), ^{
-        NSRect rect;
+        NSRect rect = NSMakeRect(x, [cocoaView gscreen].height - y - h, w, h);
 	/*
         if ([cocoaView cdx] == 1.0) {
             rect = NSMakeRect(x, [cocoaView gscreen].height - y - h, w, h);
         } else {
-	*/
             rect = NSMakeRect(
                 x * [cocoaView cdx],
                 ([cocoaView gscreen].height - y - h) * [cocoaView cdy],
                 w * [cocoaView cdx],
                 h * [cocoaView cdy]);
-	/*
         }
 	*/
         [cocoaView setNeedsDisplayInRect:rect];
