@@ -347,6 +347,7 @@ static void handleAnyDeviceErrors(Error * err)
     CAMetalLayer *_metalLayer;
     BOOL _paused;
     id<QemuMetalViewDelegate> _delegate;
+    NSUInteger _previousTitleHight;
 }
 - (CAMetalLayer *)metalLayer;
 - (void) setDelegate:(id<QemuMetalViewDelegate>)delegate;
@@ -614,6 +615,7 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     }
 
     if ([self window]) {
+        // NSLog(@"updateUIInfo 1");
         currentContentsScale = [[[self window] screen] backingScaleFactor];
         NSDictionary *description = [[[self window] screen] deviceDescription];
         CGDirectDisplayID display = [[description objectForKey:@"NSScreenNumber"] unsignedIntValue];
@@ -637,6 +639,7 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
         info.width_mm = frameSize.width / screenSize.width / currentContentsScale * screenPhysicalSize.width;
         info.height_mm = frameSize.height / screenSize.height / currentContentsScale * screenPhysicalSize.height;
     } else {
+        // NSLog(@"updateUIInfo 2");
         frameSize = [self frame].size;
         info.width_mm = 0;
         info.height_mm = 0;
@@ -647,8 +650,10 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     info.width = frameSize.width * currentContentsScale;
     info.height = frameSize.height * currentContentsScale;
 
-    dpy_set_ui_info(dcl.con, &info, TRUE);
     NSLog(@"set_ui_info: %d x %d", info.width, info.height);
+    if (screen.width != info.width || screen.height != info.height) {
+        dpy_set_ui_info(dcl.con, &info, TRUE);
+    }
 }
 
 - (void) updateUIInfo
@@ -680,6 +685,7 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     if (w != screen.width || h != screen.height) {
         // Resize before we trigger the redraw, or we'll redraw at the wrong size
         COCOA_DEBUG("switchSurface: new size %d x %d / %.0fx\n", w, h, currentContentsScale);
+        // NSLog(@"switchSurface:  new size %d x %d / %.0fx\n", w, h, currentContentsScale);
         screen.width = w;
         screen.height = h;
         [self resizeWindow];
@@ -1307,6 +1313,19 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     [self renderOnEvent];
 }
 
+- (void) updateUIInfo
+{
+    [super updateUIInfo];
+    NSUInteger h = 28.0 / self.bounds.size.height * screen.height;
+    [renderer setTitleHeight:h];
+    _previousTitleHight = h;
+    [self updateMetalAtX:0
+                       y:0
+                   width:screen.width
+                  height:h];
+    [self renderOnEvent];
+}
+
 - (void) updateMetalAtX:(int)x y:(int)y width:(int)w height:(int)h
 {
     COCOA_DEBUG("QemuMetalView: updateMetal\n");
@@ -1327,6 +1346,25 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
         [self renderOnEvent];
     }
 }
+
+- (void) showTitle
+{
+    [super showTitle];
+    [renderer setTitleBlurred:YES];
+    [self renderOnEvent];
+}
+
+- (void) hideTitle
+{
+    [super hideTitle];
+    [renderer setTitleBlurred:NO];
+    [self updateMetalAtX:0
+                       y:0
+                   width:screen.width
+                  height:_previousTitleHight / cdy];
+    [self renderOnEvent];
+}
+
 
 - (void)render
 {
@@ -1354,6 +1392,9 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 
     @synchronized(_metalLayer)
     {
+        NSUInteger h = 28.0 / self.bounds.size.height * screen.height;
+        [renderer setTitleHeight:h];
+        _previousTitleHight = h;
         if(newSize.width == _metalLayer.drawableSize.width &&
                 newSize.height == _metalLayer.drawableSize.height)
         {
@@ -1382,16 +1423,23 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 
 - (void)setFrameSize:(NSSize)size
 {
+    BOOL frameSizeChanged = CGSizeEqualToSize(size, [self frame].size);
+    NSLog(@"setFrameSize: %@ -> %@", NSStringFromSize([self bounds].size), NSStringFromSize(size));
     [super setFrameSize:size];
 
     if ([self.window isEqual:normalWindow] && !isHostResizing) {
-        [self resizeDrawable];
+        if (frameSizeChanged) {
+            NSLog(@"setFrameSize: resizeDraable %@", [NSThread callStackSymbols]);
+            [self resizeDrawable];
+        }
         [self renderOnEvent];
     }
 }
 
 - (void)setBoundsSize:(NSSize)size
 {
+    NSLog(@"setFrameSize: %@ -> %@ %@", NSStringFromSize([self bounds].size), NSStringFromSize(size), [NSThread callStackSymbols]);
+
     [super setBoundsSize:size];
     [self resizeDrawable];
     [self renderOnEvent];
@@ -1407,6 +1455,9 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     CGSize drawableSize = CGSizeMake(w, h);
 
     @synchronized(_metalLayer) {
+        NSUInteger titleHeight = 28.0 / self.bounds.size.height * h;
+        [renderer setTitleHeight:titleHeight];
+        _previousTitleHight = titleHeight;
         [_delegate drawableResize:drawableSize];
     }
     [self updateMetalAtX:0 y:0 width:w height: h];

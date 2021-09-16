@@ -31,7 +31,7 @@ if host_os == 'linux'
 endif
 
 system_ss.add(when: cocoa, if_true: files('cocoa.m'))
-system_ss.add(when: metalkit, if_true: [files('metal.m'), metalkit, metal, quartzcore])
+system_ss.add(when: metalkit, if_true: [files('metal.m'), metal, mps, quartzcore])
 
 if cocoa.found()
   install_data('metal_shader.metal', install_dir: qemu_datadir)
