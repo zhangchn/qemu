@@ -368,6 +368,7 @@ static void handleAnyDeviceErrors(Error * err)
     BOOL _paused;
     id<QemuMetalViewDelegate> _delegate;
     NSUInteger _previousTitleHight;
+    CALayer *_darkenLayer;
 }
 - (CAMetalLayer *)metalLayer;
 - (void) setDelegate:(id<QemuMetalViewDelegate>)delegate;
@@ -1256,6 +1257,11 @@ QemuMetalRenderer *renderer;
         screen.width = frameRect.size.width * currentContentsScale;
         screen.height = frameRect.size.height * currentContentsScale;
 
+        _darkenLayer = [CALayer layer];
+        _darkenLayer.frame = CGRectMake(0, frameRect.size.height - 28, frameRect.size.width, 28);
+        _darkenLayer.backgroundColor = CGColorCreateGenericGray(0.1, 1.0);
+        _darkenLayer.opacity = 0.3;
+        [self.layer addSublayer:_darkenLayer];
     }
     return self;
 }
@@ -1319,6 +1325,7 @@ QemuMetalRenderer *renderer;
 {
     [super showTitle];
     [renderer setTitleBlurred:YES];
+    _darkenLayer.hidden = NO;
     [self renderOnEvent];
 }
 
@@ -1326,6 +1333,7 @@ QemuMetalRenderer *renderer;
 {
     [super hideTitle];
     [renderer setTitleBlurred:NO];
+    _darkenLayer.hidden = YES;
     [self updateMetalAtX:0
                        y:0
                    width:screen.width
@@ -1394,6 +1402,7 @@ QemuMetalRenderer *renderer;
     BOOL frameSizeChanged = CGSizeEqualToSize(size, [self frame].size);
     NSLog(@"setFrameSize: %@ -> %@", NSStringFromSize([self bounds].size), NSStringFromSize(size));
     [super setFrameSize:size];
+    _darkenLayer.frame = CGRectMake(0, size.height - 28, size.width, 28);
 
     if ([self.window isEqual:normalWindow] && !isHostResizing) {
         if (frameSizeChanged) {
