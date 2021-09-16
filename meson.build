@@ -281,7 +281,7 @@ emulator_link_args = []
 nvmm =not_found
 hvf = not_found
 host_dsosuf = '.so'
-metalkit = []
+mps = []
 metal = []
 quartzcore = []
 simd = []
@@ -298,7 +298,7 @@ if targetos == 'windows'
 elif targetos == 'darwin'
   coref = dependency('appleframeworks', modules: 'CoreFoundation')
   metal = dependency('appleframeworks', modules: 'Metal')
-  metalkit = dependency('appleframeworks', modules: 'MetalKit')
+  mps = dependency('appleframeworks', modules: 'MetalPerformanceShaders')
   quartzcore = dependency('appleframeworks', modules: 'QuartzCore')
   iokit = dependency('appleframeworks', modules: 'IOKit', required: false)
   host_dsosuf = '.dylib'
