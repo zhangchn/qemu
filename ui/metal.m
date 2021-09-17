@@ -296,6 +296,10 @@ typedef struct
     [commandBuffer commit];
 }
 
+- (CGSize)drawableSize
+{
+    return CGSizeMake(_viewportSize.x, _viewportSize.y);
+}
 
 - (void)drawableResize:(CGSize)drawableSize
 {
@@ -315,8 +319,10 @@ typedef struct
     depthTargetDescriptor.usage       = MTLTextureUsageRenderTarget;
     
     _depthTarget = [_device newTextureWithDescriptor:depthTargetDescriptor];
+    [depthTargetDescriptor release];
     
     _drawableRenderDescriptor.depthAttachment.texture = _depthTarget;
+    [_depthTarget release];
 }
 
 - (void)updateDisplayTextureWithBuffer:(const uint8_t*)srcBytes
