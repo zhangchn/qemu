@@ -326,6 +326,7 @@ static void handleAnyDeviceErrors(Error * err)
     BOOL isHostResizing;
     BOOL windowIsMoving;
     NSTimer *hideTitleTimer;
+    NSVisualEffectView *titleBackView;
 }
 - (void) switchSurface:(pixman_image_t *)image;
 - (void) grabMouse;
@@ -348,7 +349,7 @@ static void handleAnyDeviceErrors(Error * err)
     BOOL _paused;
     id<QemuMetalViewDelegate> _delegate;
     NSUInteger _previousTitleHight;
-    CALayer *_darkenLayer;
+    //CALayer *_darkenLayer;
 }
 - (CAMetalLayer *)metalLayer;
 - (void) setDelegate:(id<QemuMetalViewDelegate>)delegate;
@@ -402,6 +403,12 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 #endif
 
         hideTitleTimer = nil;
+        titleBackView = [[NSVisualEffectView alloc] initWithFrame:NSMakeRect(0.0, frameRect.size.height - 28.0, frameRect.size.width, 28.0)];
+        titleBackView.autoresizingMask = NSViewMinYMargin | NSViewWidthSizable;
+        // titleBackView.blendingMode = NSVisualEffectBlendingModeWithinWindow;
+        titleBackView.material = NSVisualEffectMaterialTitlebar;
+        titleBackView.alphaValue = 0.5;
+        [self addSubview:titleBackView];
     }
     return self;
 }
@@ -1164,6 +1171,7 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
         [normalWindow standardWindowButton:buttonTypes[idx]].hidden = NO;
     }
     normalWindow.titleVisibility = NSWindowTitleVisible;
+    titleBackView.hidden = NO;
 }
 
 - (void) hideTitle
@@ -1174,6 +1182,7 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     for (idx = 0; idx < 3; idx ++) {
         [normalWindow standardWindowButton:buttonTypes[idx]].hidden = YES;
     }
+    titleBackView.hidden = YES;
 }
 
 - (void) hideTitleWithDelay:(NSTimer *)timer
@@ -1293,11 +1302,11 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
         screen.width = frameRect.size.width * currentContentsScale;
         screen.height = frameRect.size.height * currentContentsScale;
 
-        _darkenLayer = [CALayer layer];
-        _darkenLayer.frame = CGRectMake(0, frameRect.size.height - 28, frameRect.size.width, 28);
-        _darkenLayer.backgroundColor = CGColorCreateGenericGray(0.1, 1.0);
-        _darkenLayer.opacity = 0.3;
-        [self.layer addSublayer:_darkenLayer];
+        // _darkenLayer = [CALayer layer];
+        // _darkenLayer.frame = CGRectMake(0, frameRect.size.height - 28, frameRect.size.width, 28);
+        // _darkenLayer.backgroundColor = CGColorCreateGenericGray(0.1, 1.0);
+        // _darkenLayer.opacity = 0.3;
+        // [self.layer addSublayer:_darkenLayer];
     }
     return self;
 }
@@ -1355,7 +1364,7 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 {
     [super showTitle];
     //[renderer setTitleBlurred:YES];
-    _darkenLayer.hidden = NO;
+    // _darkenLayer.hidden = NO;
     [self renderOnEvent];
 }
 
@@ -1363,7 +1372,7 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 {
     [super hideTitle];
     //[renderer setTitleBlurred:NO];
-    _darkenLayer.hidden = YES;
+    // _darkenLayer.hidden = YES;
     [self updateMetalAtX:0
                        y:0
                    width:screen.width
@@ -1431,7 +1440,7 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     BOOL frameSizeChanged = CGSizeEqualToSize(size, [self frame].size);
     NSLog(@"setFrameSize: %@ -> %@", NSStringFromSize([self bounds].size), NSStringFromSize(size));
     [super setFrameSize:size];
-    _darkenLayer.frame = CGRectMake(0, size.height - 28, size.width, 28);
+    // _darkenLayer.frame = CGRectMake(0, size.height - 28, size.width, 28);
 
     if ([self.window isEqual:normalWindow] && !isHostResizing) {
         if (frameSizeChanged) {
@@ -1527,6 +1536,7 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
             error_report("(cocoa) can't create a view");
             exit(1);
         }
+
 
         // create a window
         window = [[NSWindow alloc] initWithContentRect:[cocoaView frame]
