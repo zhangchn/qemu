@@ -1329,7 +1329,6 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
                        y:0
                    width:screen.width
                   height:h];
-    [self renderOnEvent];
 }
 
 - (void) updateMetalAtX:(int)x y:(int)y width:(int)w height:(int)h
@@ -1348,7 +1347,6 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
                                            width:w
                                           height:h
                                           stride:stride];
-            
         [self renderOnEvent];
     }
 }
@@ -1356,7 +1354,7 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 - (void) showTitle
 {
     [super showTitle];
-    [renderer setTitleBlurred:YES];
+    //[renderer setTitleBlurred:YES];
     _darkenLayer.hidden = NO;
     [self renderOnEvent];
 }
@@ -1364,13 +1362,12 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 - (void) hideTitle
 {
     [super hideTitle];
-    [renderer setTitleBlurred:NO];
+    //[renderer setTitleBlurred:NO];
     _darkenLayer.hidden = YES;
     [self updateMetalAtX:0
                        y:0
                    width:screen.width
                   height:_previousTitleHight / cdy];
-    [self renderOnEvent];
 }
 
 
@@ -1653,11 +1650,13 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 - (void)windowWillStartLiveResize:(NSNotification *)notification
 {
     [cocoaView setHostResizing:YES];
+    [cocoaView hideTitle];
 }
 
 - (void)windowDidEndLiveResize:(NSNotification *)notification
 {
     [cocoaView setHostResizing:NO];
+    [cocoaView showTitleMomentarily];
     NSWindow *window = notification.object;
     if ([window.contentView isEqual:cocoaView]) {
         [cocoaView updateBounds];
@@ -2150,6 +2149,7 @@ static void addRemovableDevicesMenuItems(void)
     // Add the "Removable Media" menu item
     menuItem = [NSMenuItem new];
     [menuItem setAttributedTitle: attString];
+    [attString release];
     [menuItem setEnabled: NO];
     [menu addItem: menuItem];
 
