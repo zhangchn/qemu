@@ -104,10 +104,11 @@ uint64_t helper_divdeu(CPUPPCState *env, uint64_t ra, uint64_t rb, uint32_t oe)
     uint64_t rt = 0;
     int overflow = 0;
 
-    overflow = divu128(&rt, &ra, rb);
-
-    if (unlikely(overflow)) {
+    if (unlikely(rb == 0 || ra >= rb)) {
+        overflow = 1;
         rt = 0; /* Undefined */
+    } else {
+        divu128(&rt, &ra, rb);
     }
 
     if (oe) {
@@ -119,13 +120,16 @@ uint64_t helper_divdeu(CPUPPCState *env, uint64_t ra, uint64_t rb, uint32_t oe)
 
 uint64_t helper_divde(CPUPPCState *env, uint64_t rau, uint64_t rbu, uint32_t oe)
 {
-    int64_t rt = 0;
+    uint64_t rt = 0;
     int64_t ra = (int64_t)rau;
     int64_t rb = (int64_t)rbu;
-    int overflow = divs128(&rt, &ra, rb);
+    int overflow = 0;
 
-    if (unlikely(overflow)) {
+    if (unlikely(rb == 0 || uabs64(ra) >= uabs64(rb))) {
+        overflow = 1;
         rt = 0; /* Undefined */
+    } else {
+        divs128(&rt, &ra, rb);
     }
 
     if (oe) {
@@ -1492,34 +1496,16 @@ void helper_vlogefp(CPUPPCState *env, ppc_avr_t *r, ppc_avr_t *b)
     }
 }
 
-#if defined(HOST_WORDS_BIGENDIAN)
-#define VEXTU_X_DO(name, size, left)                                \
-    target_ulong glue(helper_, name)(target_ulong a, ppc_avr_t *b)  \
-    {                                                               \
-        int index;                                                  \
-        if (left) {                                                 \
-            index = (a & 0xf) * 8;                                  \
-        } else {                                                    \
-            index = ((15 - (a & 0xf) + 1) * 8) - size;              \
-        }                                                           \
-        return int128_getlo(int128_rshift(b->s128, index)) &        \
-            MAKE_64BIT_MASK(0, size);                               \
-    }
-#else
-#define VEXTU_X_DO(name, size, left)                                \
-    target_ulong glue(helper_, name)(target_ulong a, ppc_avr_t *b)  \
-    {                                                               \
-        int index;                                                  \
-        if (left) {                                                 \
-            index = ((15 - (a & 0xf) + 1) * 8) - size;              \
-        } else {                                                    \
-            index = (a & 0xf) * 8;                                  \
-        }                                                           \
-        return int128_getlo(int128_rshift(b->s128, index)) &        \
-            MAKE_64BIT_MASK(0, size);                               \
-    }
-#endif
-
+#define VEXTU_X_DO(name, size, left)                            \
+target_ulong glue(helper_, name)(target_ulong a, ppc_avr_t *b)  \
+{                                                               \
+    int index = (a & 0xf) * 8;                                  \
+    if (left) {                                                 \
+        index = 128 - index - size;                             \
+    }                                                           \
+    return int128_getlo(int128_rshift(b->s128, index)) &        \
+        MAKE_64BIT_MASK(0, size);                               \
+}
 VEXTU_X_DO(vextublx,  8, 1)
 VEXTU_X_DO(vextuhlx, 16, 1)
 VEXTU_X_DO(vextuwlx, 32, 1)
@@ -2498,40 +2484,76 @@ uint32_t helper_bcdctz(ppc_avr_t *r, ppc_avr_t *b, uint32_t ps)
     return cr;
 }
 
+/**
+ * Compare 2 128-bit unsigned integers, passed in as unsigned 64-bit pairs
+ *
+ * Returns:
+ * > 0 if ahi|alo > bhi|blo,
+ * 0 if ahi|alo == bhi|blo,
+ * < 0 if ahi|alo < bhi|blo
+ */
+static inline int ucmp128(uint64_t alo, uint64_t ahi,
+                          uint64_t blo, uint64_t bhi)
+{
+    return (ahi == bhi) ?
+        (alo > blo ? 1 : (alo == blo ? 0 : -1)) :
+        (ahi > bhi ? 1 : -1);
+}
+
 uint32_t helper_bcdcfsq(ppc_avr_t *r, ppc_avr_t *b, uint32_t ps)
 {
     int i;
-    int cr = 0;
+    int cr;
     uint64_t lo_value;
     uint64_t hi_value;
+    uint64_t rem;
     ppc_avr_t ret = { .u64 = { 0, 0 } };
 
     if (b->VsrSD(0) < 0) {
         lo_value = -b->VsrSD(1);
         hi_value = ~b->VsrD(0) + !lo_value;
         bcd_put_digit(&ret, 0xD, 0);
+
+        cr = CRF_LT;
     } else {
         lo_value = b->VsrD(1);
         hi_value = b->VsrD(0);
         bcd_put_digit(&ret, bcd_preferred_sgn(0, ps), 0);
+
+        if (hi_value == 0 && lo_value == 0) {
+            cr = CRF_EQ;
+        } else {
+            cr = CRF_GT;
+        }
     }
 
-    if (divu128(&lo_value, &hi_value, 1000000000000000ULL) ||
-            lo_value > 9999999999999999ULL) {
-        cr = CRF_SO;
+    /*
+     * Check src limits: abs(src) <= 10^31 - 1
+     *
+     * 10^31 - 1 = 0x0000007e37be2022 c0914b267fffffff
+     */
+    if (ucmp128(lo_value, hi_value,
+                0xc0914b267fffffffULL, 0x7e37be2022ULL) > 0) {
+        cr |= CRF_SO;
+
+        /*
+         * According to the ISA, if src wouldn't fit in the destination
+         * register, the result is undefined.
+         * In that case, we leave r unchanged.
+         */
+    } else {
+        rem = divu128(&lo_value, &hi_value, 1000000000000000ULL);
+
+        for (i = 1; i < 16; rem /= 10, i++) {
+            bcd_put_digit(&ret, rem % 10, i);
+        }
+
+        for (; i < 32; lo_value /= 10, i++) {
+            bcd_put_digit(&ret, lo_value % 10, i);
+        }
+
+        *r = ret;
     }
-
-    for (i = 1; i < 16; hi_value /= 10, i++) {
-        bcd_put_digit(&ret, hi_value % 10, i);
-    }
-
-    for (; i < 32; lo_value /= 10, i++) {
-        bcd_put_digit(&ret, lo_value % 10, i);
-    }
-
-    cr |= bcd_cmp_zero(&ret);
-
-    *r = ret;
 
     return cr;
 }
