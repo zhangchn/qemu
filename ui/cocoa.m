@@ -403,12 +403,13 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 #endif
 
         hideTitleTimer = nil;
-        titleBackView = [[NSVisualEffectView alloc] initWithFrame:NSMakeRect(0.0, frameRect.size.height - 28.0, frameRect.size.width, 28.0)];
-        titleBackView.autoresizingMask = NSViewMinYMargin | NSViewWidthSizable;
-        // titleBackView.blendingMode = NSVisualEffectBlendingModeWithinWindow;
-        titleBackView.material = NSVisualEffectMaterialTitlebar;
-        titleBackView.alphaValue = 0.5;
-        [self addSubview:titleBackView];
+        //titleBackView = [[NSVisualEffectView alloc] initWithFrame:NSMakeRect(0.0, frameRect.size.height - 28.0, frameRect.size.width, 28.0)];
+        //titleBackView.autoresizingMask = NSViewMinYMargin | NSViewWidthSizable;
+        //titleBackView.blendingMode = NSVisualEffectBlendingModeBehindWindow; // NSVisualEffectBlendingModeWithinWindow;
+        //titleBackView.state = NSVisualEffectStateActive;
+        //titleBackView.material = NSVisualEffectMaterialTitlebar;
+        //titleBackView.alphaValue = 0.5;
+        //[self addSubview:titleBackView];
     }
     return self;
 }
@@ -1171,7 +1172,8 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
         [normalWindow standardWindowButton:buttonTypes[idx]].hidden = NO;
     }
     normalWindow.titleVisibility = NSWindowTitleVisible;
-    titleBackView.hidden = NO;
+    normalWindow.titlebarAppearsTransparent = NO;
+    // titleBackView.hidden = NO;
 }
 
 - (void) hideTitle
@@ -1182,7 +1184,8 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     for (idx = 0; idx < 3; idx ++) {
         [normalWindow standardWindowButton:buttonTypes[idx]].hidden = YES;
     }
-    titleBackView.hidden = YES;
+    normalWindow.titlebarAppearsTransparent = YES;
+    // titleBackView.hidden = YES;
 }
 
 - (void) hideTitleWithDelay:(NSTimer *)timer
@@ -1444,7 +1447,7 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 
     if ([self.window isEqual:normalWindow] && !isHostResizing) {
         if (frameSizeChanged) {
-            NSLog(@"setFrameSize: resizeDraable %@", [NSThread callStackSymbols]);
+            // NSLog(@"setFrameSize: resizeDraable %@", [NSThread callStackSymbols]);
             [self resizeDrawable];
         }
         [self renderOnEvent];
@@ -1453,7 +1456,7 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 
 - (void)setBoundsSize:(NSSize)size
 {
-    NSLog(@"setFrameSize: %@ -> %@ %@", NSStringFromSize([self bounds].size), NSStringFromSize(size), [NSThread callStackSymbols]);
+    // NSLog(@"setFrameSize: %@ -> %@ %@", NSStringFromSize([self bounds].size), NSStringFromSize(size), [NSThread callStackSymbols]);
 
     [super setBoundsSize:size];
     [self resizeDrawable];
@@ -1672,6 +1675,16 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
         [cocoaView updateBounds];
 	[cocoaView frameUpdated];
     }
+}
+
+- (void)windowWillEnterFullScreen:(NSNotification *)notification
+{
+    [cocoaView hideTitle];
+}
+
+- (void)windowWillExitFullScreen:(NSNotification *)notification
+{
+    [cocoaView showTitleMomentarily];
 }
 
 - (void)windowWillMiniaturize:(NSNotification *)notification
