@@ -394,12 +394,13 @@ QemuMetalRenderer *renderer;
         screen.height = frameRect.size.height * currentContentsScale;
         kbd = qkbd_state_init(dcl.con);
         hideTitleTimer = nil;
-        titleBackView = [[NSVisualEffectView alloc] initWithFrame:NSMakeRect(0.0, frameRect.size.height - 28.0, frameRect.size.width, 28.0)];
-        titleBackView.autoresizingMask = NSViewMinYMargin | NSViewWidthSizable;
-        // titleBackView.blendingMode = NSVisualEffectBlendingModeWithinWindow;
-        titleBackView.material = NSVisualEffectMaterialTitlebar;
-        titleBackView.alphaValue = 0.5;
-        [self addSubview:titleBackView];
+        //titleBackView = [[NSVisualEffectView alloc] initWithFrame:NSMakeRect(0.0, frameRect.size.height - 28.0, frameRect.size.width, 28.0)];
+        //titleBackView.autoresizingMask = NSViewMinYMargin | NSViewWidthSizable;
+        //titleBackView.blendingMode = NSVisualEffectBlendingModeBehindWindow; // NSVisualEffectBlendingModeWithinWindow;
+        //titleBackView.state = NSVisualEffectStateActive;
+        //titleBackView.material = NSVisualEffectMaterialTitlebar;
+        //titleBackView.alphaValue = 0.5;
+        //[self addSubview:titleBackView];
     }
     return self;
 }
@@ -1140,7 +1141,8 @@ QemuMetalRenderer *renderer;
         [normalWindow standardWindowButton:buttonTypes[idx]].hidden = NO;
     }
     normalWindow.titleVisibility = NSWindowTitleVisible;
-    titleBackView.hidden = NO;
+    normalWindow.titlebarAppearsTransparent = NO;
+    // titleBackView.hidden = NO;
 }
 
 - (void) hideTitle
@@ -1151,7 +1153,8 @@ QemuMetalRenderer *renderer;
     for (idx = 0; idx < 3; idx ++) {
         [normalWindow standardWindowButton:buttonTypes[idx]].hidden = YES;
     }
-    titleBackView.hidden = YES;
+    normalWindow.titlebarAppearsTransparent = YES;
+    // titleBackView.hidden = YES;
 }
 
 - (void) hideTitleWithDelay:(NSTimer *)timer
@@ -1412,7 +1415,7 @@ QemuMetalRenderer *renderer;
 
     if ([self.window isEqual:normalWindow] && !isHostResizing) {
         if (frameSizeChanged) {
-            NSLog(@"setFrameSize: resizeDraable %@", [NSThread callStackSymbols]);
+            // NSLog(@"setFrameSize: resizeDraable %@", [NSThread callStackSymbols]);
             [self resizeDrawable];
         }
         [self renderOnEvent];
@@ -1421,7 +1424,7 @@ QemuMetalRenderer *renderer;
 
 - (void)setBoundsSize:(NSSize)size
 {
-    NSLog(@"setFrameSize: %@ -> %@ %@", NSStringFromSize([self bounds].size), NSStringFromSize(size), [NSThread callStackSymbols]);
+    // NSLog(@"setFrameSize: %@ -> %@ %@", NSStringFromSize([self bounds].size), NSStringFromSize(size), [NSThread callStackSymbols]);
 
     [super setBoundsSize:size];
     [self resizeDrawable];
@@ -1515,7 +1518,7 @@ QemuMetalRenderer *renderer;
             error_report("(cocoa) can't create window");
             exit(1);
         }
-        normalWindow.titlebarAppearsTransparent = YES;
+        normalWindow.titlebarAppearsTransparent = NO;
         [normalWindow setAcceptsMouseMovedEvents:YES];
         [normalWindow setTitle:@"QEMU"];
         [normalWindow setContentView:cocoaView];
@@ -1626,6 +1629,16 @@ QemuMetalRenderer *renderer;
     if ([window.contentView isEqual:cocoaView]) {
         [cocoaView updateUIInfo];
     }
+}
+
+- (void)windowWillEnterFullScreen:(NSNotification *)notification
+{
+    [cocoaView hideTitle];
+}
+
+- (void)windowWillExitFullScreen:(NSNotification *)notification
+{
+    [cocoaView showTitleMomentarily];
 }
 
 - (void)windowWillMiniaturize:(NSNotification *)notification
