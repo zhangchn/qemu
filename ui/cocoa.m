@@ -1523,7 +1523,7 @@ QemuMetalRenderer *renderer;
         [normalWindow setContentView:cocoaView];
         [normalWindow makeKeyAndOrderFront:self];
         [normalWindow center];
-        [normalWindow setDelegate: self];
+        [normalWindow setDelegate:self];
         stretch_video = false;
 
         /* Used for displaying pause on the screen */
