@@ -3,7 +3,7 @@
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
 
 // definition shared with shaders
-
+#define USE_TRIPLE_BUFFER (1)
 typedef enum QEMUVertexInputIndex
 {
     QEMUVertexInputIndexVertices = 0,
@@ -27,14 +27,23 @@ typedef struct
     vector_float2 textureCoordinate;
 } QEMUVertex;
 
-
+#if USE_TRIPLE_BUFFER
+const static NSUInteger QEMUMaxBufferCount = 3;
+#endif
 @implementation QemuMetalRenderer
 {
     id<MTLDevice> _device;
     id<MTLRenderPipelineState> _pipelineState;
     id<MTLCommandQueue> _commandQueue;
     id<MTLTexture> _depthTarget;
+#if USE_TRIPLE_BUFFER
+    id<MTLTexture> _baseTextures[QEMUMaxBufferCount];
+    dispatch_semaphore_t _inFlightSemaphore;
+    dispatch_semaphore_t _currentBufferSemaphore;
+    NSUInteger _currentBuffer;
+#else
     id<MTLTexture> _baseTexture;
+#endif
     id<MTLTexture> _cursorTexture;
     id<MTLTexture> _cursorTexturePlaceholder;
     id<MTLBuffer> _vertices;
@@ -58,7 +67,12 @@ typedef struct
     {
         
         _device = device;
-        
+#if USE_TRIPLE_BUFFER
+        _inFlightSemaphore = dispatch_semaphore_create(QEMUMaxBufferCount);
+        _currentBufferSemaphore = dispatch_semaphore_create(0);
+        _currentBuffer = 0;
+#endif
+        _pipelineState = nil;
         _commandQueue = [_device newCommandQueue];
         _viewportSize.x = 640;
         _viewportSize.y = 480;
@@ -90,7 +104,7 @@ typedef struct
             NSString *execPath = [[[NSBundle mainBundle] executablePath] stringByDeletingLastPathComponent];
             NSArray *shaderSearchPaths = @[
                 execPath,
-                [[execPath stringByAppendingString:@"../share/qemu/"] stringByStandardizingPath],
+                [[execPath stringByAppendingString:@"/../share/qemu/"] stringByStandardizingPath],
                 @"/usr/local/share/qemu"
             ];
             __block NSString *source;
@@ -181,11 +195,14 @@ typedef struct
             
             CGSize s = CGSizeMake(_viewportSize.x, _viewportSize.y);
             [self prepareTexture:s];
+#if USE_TRIPLE_BUFFER
+            NSLog(@"Triple buffer enabled");
+#else
             [_baseTexture replaceRegion:MTLRegionMake2D(0, 0, _viewportSize.x, _viewportSize.y)
                             mipmapLevel:0
                               withBytes:placeholder
                             bytesPerRow:_viewportSize.x * 4];
-            
+#endif
             // prepare cursor placeholder texture
             // A buffer of 1x1 transparent pixel could suffice for invisibility of cursor state.
             MTLTextureDescriptor *textureDescriptor = [[MTLTextureDescriptor alloc] init];
@@ -239,28 +256,42 @@ typedef struct
     textureDescriptor.pixelFormat = MTLPixelFormatBGRA8Unorm;
     textureDescriptor.width = size.width;
     textureDescriptor.height = size.height;
+#if USE_TRIPLE_BUFFER
+    for (NSUInteger idx = 0; idx < QEMUMaxBufferCount; idx++) {
+        if (_baseTextures[idx]) {
+            [_baseTextures[idx] release];
+        }
+        _baseTextures[idx] = [_device newTextureWithDescriptor:textureDescriptor];
+    }
+#else
     [_baseTexture release];
     id<MTLTexture> texture = [_device newTextureWithDescriptor:textureDescriptor];
-    [textureDescriptor release];
     _baseTexture = texture;
+#endif
+    [textureDescriptor release];
+    
 }
 
 - (void)renderToMetalLayer:(nonnull CAMetalLayer*)metalLayer
 {
+#if USE_TRIPLE_BUFFER
+    dispatch_semaphore_wait(_inFlightSemaphore, DISPATCH_TIME_FOREVER);
+    NSUInteger currentFrame = _currentBuffer;
+#endif
     id <MTLCommandBuffer> commandBuffer = [_commandQueue commandBuffer];
-    if (_blurEnabled && _blurDirty) {
-        BOOL blurred = [_blur encodeToCommandBuffer:commandBuffer
-                                     inPlaceTexture:&_baseTexture
-                              fallbackCopyAllocator:nil];
-        if (!blurred) {
-            NSLog(@"not blurred");
-        }
-        _blurDirty = NO;
-    }
+//    if (_blurEnabled && _blurDirty) {
+//        BOOL blurred = [_blur encodeToCommandBuffer:commandBuffer
+//                                     inPlaceTexture:&_baseTexture
+//                              fallbackCopyAllocator:nil];
+//        if (!blurred) {
+//            NSLog(@"not blurred");
+//        }
+//        _blurDirty = NO;
+//    }
     id<CAMetalDrawable> currentDrawable = [metalLayer nextDrawable];
     
-    if(!currentDrawable || !_pipelineState || !_baseTexture)
-    {
+//    if(!currentDrawable || !_pipelineState || !_baseTexture)
+    if(!currentDrawable || !_pipelineState) {
         return;
     }
     _drawableRenderDescriptor.colorAttachments[0].texture = currentDrawable.texture;
@@ -280,9 +311,13 @@ typedef struct
     [renderEncoder setVertexBytes:&_viewportSize
                            length:sizeof(_viewportSize)
                           atIndex:QEMUVertexInputIndexViewportSize];
+#if USE_TRIPLE_BUFFER
+    [renderEncoder setFragmentTexture:_baseTextures[_currentBuffer]
+                              atIndex:QEMUTextureIndexBaseColor];
+#else
     [renderEncoder setFragmentTexture:_baseTexture
                               atIndex:QEMUTextureIndexBaseColor];
-    
+#endif
     [renderEncoder setFragmentTexture:_cursorVisible ? _cursorTexture : _cursorTexturePlaceholder
                               atIndex:QEMUTextureIndexCursorColor];
     
@@ -292,7 +327,13 @@ typedef struct
     [renderEncoder endEncoding];
     
     [commandBuffer presentDrawable:currentDrawable];
-    
+#if USE_TRIPLE_BUFFER
+    __block dispatch_semaphore_t block_semaphore = _inFlightSemaphore;
+    [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> buffer)
+     {
+         dispatch_semaphore_signal(block_semaphore);
+     }];
+#endif
     [commandBuffer commit];
 }
 
@@ -333,10 +374,20 @@ typedef struct
                                 stride:(int)stride
 {
     MTLRegion region = MTLRegionMake2D(x, y, width, height);
+#if USE_TRIPLE_BUFFER
+    // update next frame
+    _currentBuffer = (_currentBuffer + 1) % QEMUMaxBufferCount;
+
+    [_baseTextures[_currentBuffer] replaceRegion:region
+                                     mipmapLevel:0
+                                       withBytes:srcBytes
+                                     bytesPerRow:stride];
+#else
     [_baseTexture replaceRegion:region
                     mipmapLevel:0
                       withBytes:srcBytes
                     bytesPerRow:stride];
+#endif
     if (_blurEnabled && y < _blurHeight && y + height >= _blurHeight) {
         _blurDirty = YES;
     }
