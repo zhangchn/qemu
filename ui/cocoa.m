@@ -354,6 +354,7 @@ static void handleAnyDeviceErrors(Error * err)
 - (CAMetalLayer *)metalLayer;
 - (void) setDelegate:(id<QemuMetalViewDelegate>)delegate;
 - (void) updateMetalAtX:(int)x y:(int)y width:(int)width height:(int)height;
+- (void) updateMetal;
 @end
 
 QemuCocoaView *cocoaView;
@@ -1337,10 +1338,24 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     NSUInteger h = 28.0 / self.bounds.size.height * screen.height;
     [renderer setTitleHeight:h];
     _previousTitleHight = h;
+    /*
     [self updateMetalAtX:0
                        y:0
                    width:screen.width
                   height:h];
+     */
+}
+
+- (void) updateMetal
+{
+    if (pixman_image) {
+        int w = pixman_image_get_width(pixman_image);
+        int h = pixman_image_get_height(pixman_image);
+        [self updateMetalAtX:0
+                           y:0
+                       width:w
+                      height:h];
+    }
 }
 
 - (void) updateMetalAtX:(int)x y:(int)y width:(int)w height:(int)h
@@ -1376,10 +1391,12 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     [super hideTitle];
     //[renderer setTitleBlurred:NO];
     // _darkenLayer.hidden = YES;
+    /*
     [self updateMetalAtX:0
                        y:0
                    width:screen.width
                   height:_previousTitleHight / cdy];
+     */
 }
 
 
@@ -2364,7 +2381,8 @@ static void cocoa_update(DisplayChangeListener *dcl,
 {
 #if COCOA_METAL_VIEW
     dispatch_async(dispatch_get_main_queue(), ^{
-        [(QemuMetalView *)cocoaView updateMetalAtX:x y:y width:w height:h];
+//        [(QemuMetalView *)cocoaView updateMetalAtX:x y:y width:w height:h];
+        [(QemuMetalView *)cocoaView updateMetal];
     });
 #else
     NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
