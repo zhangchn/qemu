@@ -29,8 +29,5 @@
 
 - (void)drawableResize:(CGSize)drawableSize;
 - (CGSize)drawableSize;
-- (void)setTitleHeight:(NSUInteger)h;
-- (NSUInteger)getTitleHeight;
-- (void)setTitleBlurred:(BOOL)blurred;
 @end
 

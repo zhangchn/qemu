@@ -1,6 +1,5 @@
 #import "metal.h"
 #import <simd/simd.h>
-#import <MetalPerformanceShaders/MetalPerformanceShaders.h>
 
 // definition shared with shaders
 #define USE_TRIPLE_BUFFER (1)
@@ -53,10 +52,6 @@ const static NSUInteger QEMUMaxBufferCount = 3;
     BOOL _cursorVisible;
     MTLRenderPassDescriptor *_drawableRenderDescriptor;
     id<MTLDepthStencilState> _depthState;
-    MPSImageGaussianBlur *_blur;
-    NSUInteger _blurHeight;
-    BOOL _blurEnabled;
-    BOOL _blurDirty;
 }
 
 - (id)initWithMetalDevice:(nonnull id<MTLDevice>)device
@@ -89,10 +84,6 @@ const static NSUInteger QEMUMaxBufferCount = 3;
         _drawableRenderDescriptor.depthAttachment.loadAction = MTLLoadActionClear;
         _drawableRenderDescriptor.depthAttachment.storeAction = MTLStoreActionDontCare;
         _drawableRenderDescriptor.depthAttachment.clearDepth = 1.0;
-        _blur = [[MPSImageGaussianBlur alloc] initWithDevice:device sigma:5.0];
-        _blur.edgeMode = MPSImageEdgeModeMirror;
-        _blurEnabled = NO;
-        _blurHeight = 56;
 
         MTLDepthStencilDescriptor *depthDescriptor = [MTLDepthStencilDescriptor new];
         depthDescriptor.depthCompareFunction = MTLCompareFunctionLessEqual;
@@ -279,18 +270,8 @@ const static NSUInteger QEMUMaxBufferCount = 3;
     NSUInteger currentFrame = _currentBuffer;
 #endif
     id <MTLCommandBuffer> commandBuffer = [_commandQueue commandBuffer];
-//    if (_blurEnabled && _blurDirty) {
-//        BOOL blurred = [_blur encodeToCommandBuffer:commandBuffer
-//                                     inPlaceTexture:&_baseTexture
-//                              fallbackCopyAllocator:nil];
-//        if (!blurred) {
-//            NSLog(@"not blurred");
-//        }
-//        _blurDirty = NO;
-//    }
     id<CAMetalDrawable> currentDrawable = [metalLayer nextDrawable];
     
-//    if(!currentDrawable || !_pipelineState || !_baseTexture)
     if(!currentDrawable || !_pipelineState) {
         return;
     }
@@ -350,7 +331,6 @@ const static NSUInteger QEMUMaxBufferCount = 3;
     }
     _viewportSize.x = drawableSize.width;
     _viewportSize.y = drawableSize.height;
-    _blur.clipRect = MTLRegionMake2D(0, 0, _viewportSize.x, MIN(_blurHeight, _viewportSize.y));
     
     MTLTextureDescriptor *depthTargetDescriptor = [MTLTextureDescriptor new];
     depthTargetDescriptor.width       = drawableSize.width;
@@ -388,10 +368,6 @@ const static NSUInteger QEMUMaxBufferCount = 3;
                       withBytes:srcBytes
                     bytesPerRow:stride];
 #endif
-    if (_blurEnabled && y < _blurHeight && y + height >= _blurHeight) {
-        _blurDirty = YES;
-    }
-//    [commandBuffer waitUntilCompleted];
 
 }
 
@@ -448,23 +424,4 @@ const static NSUInteger QEMUMaxBufferCount = 3;
     }
 }
 
-- (NSUInteger) getTitleHeight
-{
-    return _blurHeight;
-}
-
-- (void)setTitleHeight:(NSUInteger)h
-{
-    NSLog(@"title height: %lu", h);
-    _blurHeight = h;
-    _blur.clipRect = MTLRegionMake2D(0, 0, _viewportSize.x, MIN(_blurHeight, _viewportSize.y));
-    _blurDirty = YES;
-    
-}
-
-- (void)setTitleBlurred:(BOOL)blurred
-{
-    _blurEnabled = blurred;
-    _blurDirty = blurred;
-}
 @end
