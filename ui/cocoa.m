@@ -368,7 +368,6 @@ static void handleAnyDeviceErrors(Error * err)
     CAMetalLayer *_metalLayer;
     BOOL _paused;
     id<QemuMetalViewDelegate> _delegate;
-    NSUInteger _previousTitleHight;
     //CALayer *_darkenLayer;
 }
 - (CAMetalLayer *)metalLayer;
@@ -1142,7 +1141,6 @@ QemuMetalRenderer *renderer;
     }
     normalWindow.titleVisibility = NSWindowTitleVisible;
     normalWindow.titlebarAppearsTransparent = NO;
-    // titleBackView.hidden = NO;
 }
 
 - (void) hideTitle
@@ -1154,7 +1152,6 @@ QemuMetalRenderer *renderer;
         [normalWindow standardWindowButton:buttonTypes[idx]].hidden = YES;
     }
     normalWindow.titlebarAppearsTransparent = YES;
-    // titleBackView.hidden = YES;
 }
 
 - (void) hideTitleWithDelay:(NSTimer *)timer
@@ -1303,8 +1300,6 @@ QemuMetalRenderer *renderer;
 {
     [super updateUIInfo];
     NSUInteger h = 28.0 / self.bounds.size.height * screen.height;
-    [renderer setTitleHeight:h];
-    _previousTitleHight = h;
     /*
     [self updateMetalAtX:0
                        y:0
@@ -1348,22 +1343,12 @@ QemuMetalRenderer *renderer;
 - (void) showTitle
 {
     [super showTitle];
-    //[renderer setTitleBlurred:YES];
-    // _darkenLayer.hidden = NO;
     [self renderOnEvent];
 }
 
 - (void) hideTitle
 {
     [super hideTitle];
-    //[renderer setTitleBlurred:NO];
-    // _darkenLayer.hidden = YES;
-    /*
-    [self updateMetalAtX:0
-                       y:0
-                   width:screen.width
-                  height:_previousTitleHight / cdy];
-     */
 }
 
 
@@ -1394,8 +1379,6 @@ QemuMetalRenderer *renderer;
     @synchronized(_metalLayer)
     {
         NSUInteger h = 28.0 / self.bounds.size.height * screen.height;
-        [renderer setTitleHeight:h];
-        _previousTitleHight = h;
         if(newSize.width == _metalLayer.drawableSize.width &&
                 newSize.height == _metalLayer.drawableSize.height)
         {
@@ -1457,9 +1440,6 @@ QemuMetalRenderer *renderer;
     CGSize drawableSize = CGSizeMake(w, h);
 
     @synchronized(_metalLayer) {
-        NSUInteger titleHeight = 28.0 / self.bounds.size.height * h;
-        [renderer setTitleHeight:titleHeight];
-        _previousTitleHight = titleHeight;
         [_delegate drawableResize:drawableSize];
     }
     [self updateMetalAtX:0 y:0 width:w height: h];
@@ -2400,7 +2380,6 @@ static void cocoa_update(DisplayChangeListener *dcl,
 {
 #if COCOA_METAL_VIEW
     dispatch_async(dispatch_get_main_queue(), ^{
-//        [(QemuMetalView *)cocoaView updateMetalAtX:x y:y width:w height:h];
         [(QemuMetalView *)cocoaView updateMetal];
     });
 #else
