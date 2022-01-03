@@ -284,7 +284,8 @@ host_dsosuf = '.so'
 mps = []
 metal = []
 quartzcore = []
-simd = []
+avfoundation = []
+coremedia = []
 
 if targetos == 'windows'
   socket = cc.find_library('ws2_32')
@@ -300,6 +301,8 @@ elif targetos == 'darwin'
   metal = dependency('appleframeworks', modules: 'Metal')
   mps = dependency('appleframeworks', modules: 'MetalPerformanceShaders')
   quartzcore = dependency('appleframeworks', modules: 'QuartzCore')
+  avfoundation = dependency('appleframeworks', modules: 'AVFoundation')
+  coremedia = dependency('appleframeworks', modules: 'CoreMedia')
   iokit = dependency('appleframeworks', modules: 'IOKit', required: false)
   host_dsosuf = '.dylib'
 elif targetos == 'sunos'

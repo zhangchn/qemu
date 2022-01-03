@@ -26,6 +26,7 @@ softmmu_ss.add(when: 'CONFIG_LINUX', if_true: files(
 ))
 softmmu_ss.add(when: cocoa, if_true: files('cocoa.m'))
 softmmu_ss.add(when: metal, if_true: [files('metal.m'), metal, mps, quartzcore])
+softmmu_ss.add(when: avfoundation, if_true: [avfoundation, coremedia])
 # if config_host.has_key('CONFIG_COCOA')
 if cocoa.found()
   install_data('metal_shader.metal', install_dir: qemu_datadir)
