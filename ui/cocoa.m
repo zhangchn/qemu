@@ -727,6 +727,7 @@ QemuMetalRenderer *renderer;
     bool isResize = (w != screen.width || h != screen.height || cdx == 0.0);
 
     int oldh = screen.height;
+    BOOL needsRestartRecording = NO;
     if (isResize) {
         // Resize before we trigger the redraw, or we'll redraw at the wrong size
         COCOA_DEBUG("switchSurface: new size %d x %d / %.0fx\n", w, h, currentContentsScale);
@@ -737,7 +738,7 @@ QemuMetalRenderer *renderer;
         [self setFrame:NSMakeRect(cx, cy, cw, ch)];
         if (isRecording) {
             [self stopRecording];
-            [self startRecording:self];
+            needsRestartRecording = YES;
         }
     }
 
@@ -762,7 +763,9 @@ QemuMetalRenderer *renderer;
                                                          NULL,
                                                          &compressionInBuffer);
     pixman_image = image;
-
+    if (needsRestartRecording) {
+        [self startRecording:self];
+    }
     // update windows
     NSRect f = NSMakeRect(
         [normalWindow frame].origin.x,
