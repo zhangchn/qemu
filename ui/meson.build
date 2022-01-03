@@ -32,6 +32,7 @@ endif
 
 system_ss.add(when: cocoa, if_true: files('cocoa.m'))
 system_ss.add(when: metalkit, if_true: [files('metal.m'), metal, mps, quartzcore])
+system_ss.add(when: avfoundation, if_true: [avfoundation, coremedia])
 
 if cocoa.found()
   install_data('metal_shader.metal', install_dir: qemu_datadir)

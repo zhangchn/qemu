@@ -26,6 +26,7 @@
 
 #import <Cocoa/Cocoa.h>
 #import <QuartzCore/CAMetalLayer.h>
+#import <AVFoundation/AVFoundation.h>
 #include <crt_externs.h>
 
 #include "qemu/help-texts.h"
@@ -326,7 +327,13 @@ static void handleAnyDeviceErrors(Error * err)
     BOOL isHostResizing;
     BOOL windowIsMoving;
     NSTimer *hideTitleTimer;
-    NSVisualEffectView *titleBackView;
+    AVAssetWriter *recorder;
+    AVAssetWriterInput *recorderInput;
+    AVAssetWriterInputPixelBufferAdaptor *recorderInputAdaptor;
+    CGSize recordingSize;
+    BOOL isRecording;
+    NSDate *recordingStart;
+    CVPixelBufferRef compressionInBuffer;
 }
 - (void) switchSurface:(pixman_image_t *)image;
 - (void) grabMouse;
@@ -341,6 +348,10 @@ static void handleAnyDeviceErrors(Error * err)
 - (void) raiseAllKeys;
 - (void) setHostResizing:(BOOL)resizing;
 - (float) currentContentsScale;
+- (IBAction) startRecording:(id)sender;
+- (IBAction) stopRecording;
+- (BOOL) isRecording;
+- (void) recordFrame;
 @end
 
 @interface QemuMetalView: QemuCocoaView <CALayerDelegate>
@@ -348,7 +359,6 @@ static void handleAnyDeviceErrors(Error * err)
     CAMetalLayer *_metalLayer;
     BOOL _paused;
     id<QemuMetalViewDelegate> _delegate;
-    //CALayer *_darkenLayer;
 }
 - (CAMetalLayer *)metalLayer;
 - (void) setDelegate:(id<QemuMetalViewDelegate>)delegate;
@@ -403,13 +413,6 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 #endif
 
         hideTitleTimer = nil;
-        //titleBackView = [[NSVisualEffectView alloc] initWithFrame:NSMakeRect(0.0, frameRect.size.height - 28.0, frameRect.size.width, 28.0)];
-        //titleBackView.autoresizingMask = NSViewMinYMargin | NSViewWidthSizable;
-        //titleBackView.blendingMode = NSVisualEffectBlendingModeBehindWindow; // NSVisualEffectBlendingModeWithinWindow;
-        //titleBackView.state = NSVisualEffectStateActive;
-        //titleBackView.material = NSVisualEffectMaterialTitlebar;
-        //titleBackView.alphaValue = 0.5;
-        //[self addSubview:titleBackView];
     }
     return self;
 }
@@ -429,13 +432,17 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     [super dealloc];
 }
 
-- (void)setHostResizing:(BOOL)resizing
+- (void) setHostResizing:(BOOL)resizing
 {
     isHostResizing = resizing;
 }
 
 - (float) currentContentsScale {
     return currentContentsScale;
+}
+
+- (BOOL) isRecording {
+    return isRecording;
 }
 
 - (BOOL) isOpaque
@@ -477,6 +484,80 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
         return;
     }
     [NSCursor unhide];
+}
+
+- (IBAction) startRecording:(id) sender
+{
+    NSError *err;
+    
+    NSString *outputPath = [NSString stringWithFormat:@"/tmp/out_%.1f.mp4", [[NSDate now] timeIntervalSinceReferenceDate]];
+    NSURL *fileURL = [NSURL fileURLWithPath:outputPath];
+    recorder = [[AVAssetWriter alloc] initWithURL:fileURL fileType:AVFileTypeMPEG4 error:&err];
+    
+    recorderInput = [[AVAssetWriterInput alloc] initWithMediaType:AVMediaTypeVideo
+                                                   outputSettings:@{
+        AVVideoCodecKey: AVVideoCodecTypeH264,
+        AVVideoWidthKey: [NSNumber numberWithInt:screen.width],
+        AVVideoHeightKey: [NSNumber numberWithInt:screen.height],
+    }];
+    NSParameterAssert([recorder canAddInput:recorderInput]);
+    [recorder addInput:recorderInput];
+    recorderInputAdaptor = [[AVAssetWriterInputPixelBufferAdaptor alloc] initWithAssetWriterInput:recorderInput sourcePixelBufferAttributes:nil];
+    
+    if (compressionInBuffer) {
+        CFRelease(compressionInBuffer);
+        compressionInBuffer = NULL;
+    }
+    
+    OSStatus bufferStatus = CVPixelBufferCreateWithBytes(NULL,
+                                                         screen.width,
+                                                         screen.height,
+                                                         kCVPixelFormatType_32BGRA,
+                                                         pixman_image_get_data(pixman_image),
+                                                         pixman_image_get_stride(pixman_image),
+                                                         NULL,
+                                                         NULL,
+                                                         NULL,
+                                                         &compressionInBuffer);
+    if (bufferStatus != kCVReturnSuccess) {
+        NSLog(@"err creating pixel buf: %d", bufferStatus);
+        return;
+    }
+    recordingStart = [NSDate new];
+    [recorder startWriting];
+    [recorder startSessionAtSourceTime:kCMTimeZero];
+    isRecording = TRUE;
+    [self recordFrame];
+}
+
+- (IBAction) stopRecording
+{
+    if (isRecording) {
+        isRecording = FALSE;
+        NSDate *now = [NSDate now];
+        NSTimeInterval interval = [now timeIntervalSinceDate:recordingStart];
+        CMTime ts = CMTimeMakeWithSeconds(interval, 1000000);
+        [recorderInputAdaptor release];
+        [recorderInput markAsFinished];
+        [recorderInput release];
+        [recorder endSessionAtSourceTime:ts];
+        [recorder finishWritingWithCompletionHandler:^() {
+            NSLog(@"finishWriting");
+        }];
+        [recordingStart release];
+    }
+}
+
+- (void) recordFrame
+{
+    if (compressionInBuffer) {
+        NSLog(@"recordFrame: 0");
+        NSDate *now = [NSDate now];
+        NSTimeInterval interval = [now timeIntervalSinceDate:recordingStart];
+        CMTime ts = CMTimeMakeWithSeconds(interval, 1000000);
+        [recorderInputAdaptor appendPixelBuffer:compressionInBuffer
+                           withPresentationTime:ts];
+    }
 }
 
 - (void) drawRect:(NSRect) rect
@@ -699,13 +780,32 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
         screen.height = h;
         [self resizeWindow];
         [self updateBounds];
+        if (isRecording) {
+            [self stopRecording];
+            [self startRecording:self];
+        }
     }
 
     // update screenBuffer
     if (pixman_image) {
         pixman_image_unref(pixman_image);
     }
-
+    
+    if (compressionInBuffer) {
+        CFRelease(compressionInBuffer);
+        compressionInBuffer = NULL;
+    }
+    
+    OSStatus bufferStatus = CVPixelBufferCreateWithBytes(NULL,
+                                                         screen.width,
+                                                         screen.height,
+                                                         kCVPixelFormatType_32BGRA,
+                                                         pixman_image_get_data(image),
+                                                         pixman_image_get_stride(image),
+                                                         NULL,
+                                                         NULL,
+                                                         NULL,
+                                                         &compressionInBuffer);
     pixman_image = image;
 }
 
@@ -1302,12 +1402,6 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
         currentContentsScale = [_metalLayer contentsScale];
         screen.width = frameRect.size.width * currentContentsScale;
         screen.height = frameRect.size.height * currentContentsScale;
-
-        // _darkenLayer = [CALayer layer];
-        // _darkenLayer.frame = CGRectMake(0, frameRect.size.height - 28, frameRect.size.width, 28);
-        // _darkenLayer.backgroundColor = CGColorCreateGenericGray(0.1, 1.0);
-        // _darkenLayer.opacity = 0.3;
-        // [self.layer addSublayer:_darkenLayer];
     }
     return self;
 }
@@ -1443,7 +1537,6 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     BOOL frameSizeChanged = CGSizeEqualToSize(size, [self frame].size);
     NSLog(@"setFrameSize: %@ -> %@", NSStringFromSize([self bounds].size), NSStringFromSize(size));
     [super setFrameSize:size];
-    // _darkenLayer.frame = CGRectMake(0, size.height - 28, size.width, 28);
 
     if ([self.window isEqual:normalWindow] && !isHostResizing) {
         if (frameSizeChanged) {
@@ -1456,8 +1549,6 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 
 - (void)setBoundsSize:(NSSize)size
 {
-    // NSLog(@"setFrameSize: %@ -> %@ %@", NSStringFromSize([self bounds].size), NSStringFromSize(size), [NSThread callStackSymbols]);
-
     [super setBoundsSize:size];
     [self resizeDrawable];
     [self renderOnEvent];
@@ -1509,6 +1600,8 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 - (void)openDocumentation:(NSString *)filename;
 - (IBAction) do_about_menu_item: (id) sender;
 - (void)adjustSpeed:(id)sender;
+- (IBAction) startRecording:(id)sender;
+- (IBAction) stopRecording:(id)sender;
 @end
 
 @implementation QemuCocoaAppController
@@ -1996,6 +2089,23 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     COCOA_DEBUG("cpu throttling at %d%c\n", cpu_throttle_get_percentage(), '%');
 }
 
+- (IBAction) startRecording:(id)sender
+{
+    [sender setEnabled:NO];
+    [cocoaView startRecording: sender];
+    if ([cocoaView isRecording]) {
+        [[[sender menu] itemWithTitle:@"Stop Recording"] setEnabled: YES];
+    }
+}
+
+- (IBAction) stopRecording:(id)sender
+{
+    [sender setEnabled: NO];
+    [cocoaView stopRecording];
+    if (![cocoaView isRecording]) {
+        [[[sender menu] itemWithTitle:@"Record"] setEnabled: YES];
+    }
+}
 @end
 
 @interface QemuApplication : NSApplication
@@ -2054,6 +2164,7 @@ static void create_initial_menus(void)
 
     // View menu
     menu = [[NSMenu alloc] initWithTitle:@"View"];
+    [menu setAutoenablesItems: NO];
     [menu addItem: [[[NSMenuItem alloc] initWithTitle:@"Enter Fullscreen" action:@selector(doToggleFullScreen:) keyEquivalent:@"f"] autorelease]]; // Fullscreen
     menuItem = [[[NSMenuItem alloc] initWithTitle:@"Zoom To Fit" action:@selector(zoomToFit:) keyEquivalent:@""] autorelease];
     [menuItem setState: [[cocoaView window] styleMask] & NSWindowStyleMaskResizable ? NSControlStateValueOn : NSControlStateValueOff];
@@ -2061,6 +2172,15 @@ static void create_initial_menus(void)
     menuItem = [[[NSMenuItem alloc] initWithTitle:@"Zoom Interpolation" action:@selector(toggleZoomInterpolation:) keyEquivalent:@""] autorelease];
     [menuItem setState: zoom_interpolation == kCGInterpolationLow ? NSControlStateValueOn : NSControlStateValueOff];
     [menu addItem: menuItem];
+    [menu addItem:[NSMenuItem separatorItem]];
+    menuItem = [[[NSMenuItem alloc] initWithTitle:@"Record" action:@selector(startRecording:) keyEquivalent:@""] autorelease];
+    [menu addItem: menuItem];
+    [menuItem setTag:1200];
+    [menuItem setEnabled: YES];
+    menuItem = [[[NSMenuItem alloc] initWithTitle:@"Stop Recording" action:@selector(stopRecording:) keyEquivalent:@""] autorelease];
+    [menu addItem: menuItem];
+    [menuItem setTag:1201];
+    [menuItem setEnabled: NO];
     menuItem = [[[NSMenuItem alloc] initWithTitle:@"View" action:nil keyEquivalent:@""] autorelease];
     [menuItem setSubmenu:menu];
     [[NSApp mainMenu] addItem:menuItem];
@@ -2359,6 +2479,9 @@ static int cocoa_main(void)
 static void cocoa_update(DisplayChangeListener *dcl,
                          int x, int y, int w, int h)
 {
+    if ([cocoaView isRecording]) {
+        [cocoaView recordFrame];
+    }
 #if COCOA_METAL_VIEW
     dispatch_async(dispatch_get_main_queue(), ^{
         [(QemuMetalView *)cocoaView updateMetal];
