@@ -772,6 +772,7 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     int w = pixman_image_get_width(image);
     int h = pixman_image_get_height(image);
 
+    BOOL needsRestartRecording = NO;
     if (w != screen.width || h != screen.height) {
         // Resize before we trigger the redraw, or we'll redraw at the wrong size
         COCOA_DEBUG("switchSurface: new size %d x %d / %.0fx\n", w, h, currentContentsScale);
@@ -782,7 +783,7 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
         [self updateBounds];
         if (isRecording) {
             [self stopRecording];
-            [self startRecording:self];
+            needsRestartRecording = YES;
         }
     }
 
@@ -807,6 +808,9 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
                                                          NULL,
                                                          &compressionInBuffer);
     pixman_image = image;
+    if (needsRestartRecording) {
+        [self startRecording:self];
+    }
 }
 
 - (void) setFullGrab:(id)sender
