@@ -74,6 +74,8 @@ if cpu not in supported_cpus
   host_arch = 'unknown'
 elif cpu == 'x86'
   host_arch = 'i386'
+elif cpu == 'mips64'
+  host_arch = 'mips'
 else
   host_arch = cpu
 endif
@@ -236,6 +238,7 @@ endif
 # Target-specific checks and dependencies #
 ###########################################
 
+# Fuzzing
 if get_option('fuzzing') and get_option('fuzzing_engine') == '' and \
     not cc.links('''
           #include <stdint.h>
@@ -247,6 +250,7 @@ if get_option('fuzzing') and get_option('fuzzing_engine') == '' and \
   error('Your compiler does not support -fsanitize=fuzzer')
 endif
 
+# Tracing backends
 if 'ftrace' in get_option('trace_backends') and targetos != 'linux'
   error('ftrace is supported only on Linux')
 endif
@@ -260,6 +264,7 @@ if 'syslog' in get_option('trace_backends') and not cc.compiles('''
   error('syslog is not supported on this system')
 endif
 
+# Miscellaneous Linux-only features
 if targetos != 'linux' and get_option('mpath').enabled()
   error('Multipath is supported only on Linux')
 endif
@@ -269,6 +274,7 @@ if targetos != 'linux' and get_option('multiprocess').enabled()
 endif
 multiprocess_allowed = targetos == 'linux' and not get_option('multiprocess').disabled()
 
+# Target-specific libraries and flags
 libm = cc.find_library('m', required: false)
 threads = dependency('threads')
 util = cc.find_library('util', required: false)
@@ -320,6 +326,7 @@ elif targetos == 'openbsd'
   endif
 endif
 
+# Target-specific configuration of accelerators
 accelerators = []
 if not get_option('kvm').disabled() and targetos == 'linux'
   accelerators += 'CONFIG_KVM'
@@ -449,7 +456,8 @@ if not get_option('linux_aio').auto() or have_block
 endif
 linux_io_uring = not_found
 if not get_option('linux_io_uring').auto() or have_block
-  linux_io_uring = dependency('liburing', required: get_option('linux_io_uring'),
+  linux_io_uring = dependency('liburing', version: '>=0.3',
+                              required: get_option('linux_io_uring'),
                               method: 'pkg-config', kwargs: static_kwargs)
 endif
 libxml2 = not_found
@@ -2038,6 +2046,18 @@ config_all += {
   'CONFIG_ALL': true,
 }
 
+target_configs_h = []
+foreach target: target_dirs
+  target_configs_h += config_target_h[target]
+  target_configs_h += config_devices_h.get(target, [])
+endforeach
+genh += custom_target('config-poison.h',
+                      input: [target_configs_h],
+                      output: 'config-poison.h',
+                      capture: true,
+                      command: [find_program('scripts/make-config-poison.sh'),
+                                target_configs_h])
+
 ##############
 # Submodules #
 ##############
@@ -2409,7 +2429,6 @@ blockdev_ss = ss.source_set()
 block_ss = ss.source_set()
 chardev_ss = ss.source_set()
 common_ss = ss.source_set()
-common_user_ss = ss.source_set()
 crypto_ss = ss.source_set()
 hwcore_ss = ss.source_set()
 io_ss = ss.source_set()
@@ -2661,17 +2680,6 @@ subdir('common-user')
 subdir('bsd-user')
 subdir('linux-user')
 
-common_user_ss = common_user_ss.apply(config_all, strict: false)
-common_user = static_library('common-user',
-                             sources: common_user_ss.sources(),
-                             dependencies: common_user_ss.dependencies(),
-                             include_directories: common_user_inc,
-                             name_suffix: 'fa',
-                             build_by_default: false)
-common_user = declare_dependency(link_with: common_user)
-
-user_ss.add(common_user)
-
 # needed for fuzzing binaries
 subdir('tests/qtest/libqos')
 subdir('tests/qtest/fuzz')
@@ -2871,8 +2879,10 @@ common_ss.add(hwcore)
 # Targets #
 ###########
 
+emulator_modules = []
 foreach m : block_mods + softmmu_mods
-  shared_module(m.name(),
+  emulator_modules += shared_module(m.name(),
+                build_by_default: true,
                 name_prefix: '',
                 link_whole: m,
                 install: true,
@@ -2889,6 +2899,7 @@ common_all = common_ss.apply(config_all, strict: false)
 common_all = static_library('common',
                             build_by_default: false,
                             sources: common_all.sources() + genh,
+                            include_directories: common_user_inc,
                             implicit_include_directories: false,
                             dependencies: common_all.dependencies(),
                             name_suffix: 'fa')
@@ -2929,6 +2940,7 @@ foreach target : target_dirs
   else
     abi = config_target['TARGET_ABI_DIR']
     target_type='user'
+    target_inc += common_user_inc
     qemu_target_name = 'qemu-' + target_name
     if target_base_arch in target_user_arch
       t = target_user_arch[target_base_arch].apply(config_target, strict: false)
@@ -2937,13 +2949,12 @@ foreach target : target_dirs
     endif
     if 'CONFIG_LINUX_USER' in config_target
       base_dir = 'linux-user'
-      target_inc += include_directories('linux-user/host/' / host_arch)
     endif
     if 'CONFIG_BSD_USER' in config_target
       base_dir = 'bsd-user'
       target_inc += include_directories('bsd-user/' / targetos)
       dir = base_dir / abi
-      arch_srcs += files(dir / 'target_arch_cpu.c')
+      arch_srcs += files(dir / 'signal.c', dir / 'target_arch_cpu.c')
     endif
     target_inc += include_directories(
       base_dir,
@@ -3466,7 +3477,6 @@ if spice_protocol.found()
   summary_info += {'  spice server support': spice}
 endif
 summary_info += {'rbd support':       rbd}
-summary_info += {'xfsctl support':    config_host.has_key('CONFIG_XFS')}
 summary_info += {'smartcard support': cacard}
 summary_info += {'U2F support':       u2f}
 summary_info += {'libusb':            libusb}
