@@ -2,7 +2,7 @@
 #import <simd/simd.h>
 
 // definition shared with shaders
-#define USE_TRIPLE_BUFFER (1)
+#define USE_TRIPLE_BUFFER (0)
 typedef enum QEMUVertexInputIndex
 {
     QEMUVertexInputIndexVertices = 0,
@@ -119,7 +119,6 @@ const static NSUInteger QEMUMaxBufferCount = 3;
                 return nil;
             }
             [source autorelease];
-            void *placeholder = malloc(_viewportSize.x * _viewportSize.y * 4);
             NSError *libError;
             id<MTLLibrary> shaderLib = [_device newLibraryWithSource:source
                                                              options:nil
@@ -189,6 +188,7 @@ const static NSUInteger QEMUMaxBufferCount = 3;
 #if USE_TRIPLE_BUFFER
             NSLog(@"Triple buffer enabled");
 #else
+            void *placeholder = malloc(_viewportSize.x * _viewportSize.y * 4);
             [_baseTexture replaceRegion:MTLRegionMake2D(0, 0, _viewportSize.x, _viewportSize.y)
                             mipmapLevel:0
                               withBytes:placeholder
@@ -267,12 +267,14 @@ const static NSUInteger QEMUMaxBufferCount = 3;
 {
 #if USE_TRIPLE_BUFFER
     dispatch_semaphore_wait(_inFlightSemaphore, DISPATCH_TIME_FOREVER);
-    NSUInteger currentFrame = _currentBuffer;
 #endif
     id <MTLCommandBuffer> commandBuffer = [_commandQueue commandBuffer];
     id<CAMetalDrawable> currentDrawable = [metalLayer nextDrawable];
     
     if(!currentDrawable || !_pipelineState) {
+#if USE_TRIPLE_BUFFER
+        dispatch_semaphore_signal(_inFlightSemaphore);
+#endif
         return;
     }
     _drawableRenderDescriptor.colorAttachments[0].texture = currentDrawable.texture;

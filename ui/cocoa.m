@@ -705,7 +705,6 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     }
 
     if ([self window]) {
-        // NSLog(@"updateUIInfo 1");
         currentContentsScale = [[[self window] screen] backingScaleFactor];
         NSDictionary *description = [[[self window] screen] deviceDescription];
         CGDirectDisplayID display = [[description objectForKey:@"NSScreenNumber"] unsignedIntValue];
@@ -729,7 +728,6 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
         info.width_mm = frameSize.width / screenSize.width / currentContentsScale * screenPhysicalSize.width;
         info.height_mm = frameSize.height / screenSize.height / currentContentsScale * screenPhysicalSize.height;
     } else {
-        // NSLog(@"updateUIInfo 2");
         frameSize = [self frame].size;
         info.width_mm = 0;
         info.height_mm = 0;
@@ -1427,18 +1425,6 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     [self renderOnEvent];
 }
 
-- (void) updateUIInfo
-{
-    [super updateUIInfo];
-    NSUInteger h = 28.0 / self.bounds.size.height * screen.height;
-    /*
-    [self updateMetalAtX:0
-                       y:0
-                   width:screen.width
-                  height:h];
-     */
-}
-
 - (void) updateMetal
 {
     if (pixman_image) {
@@ -1509,7 +1495,6 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 
     @synchronized(_metalLayer)
     {
-        NSUInteger h = 28.0 / self.bounds.size.height * screen.height;
         if(newSize.width == _metalLayer.drawableSize.width &&
                 newSize.height == _metalLayer.drawableSize.height)
         {
@@ -1539,12 +1524,11 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 - (void)setFrameSize:(NSSize)size
 {
     BOOL frameSizeChanged = CGSizeEqualToSize(size, [self frame].size);
-    NSLog(@"setFrameSize: %@ -> %@", NSStringFromSize([self bounds].size), NSStringFromSize(size));
+    // NSLog(@"setFrameSize: %@ -> %@", NSStringFromSize([self bounds].size), NSStringFromSize(size));
     [super setFrameSize:size];
 
     if ([self.window isEqual:normalWindow] && !isHostResizing) {
         if (frameSizeChanged) {
-            // NSLog(@"setFrameSize: resizeDraable %@", [NSThread callStackSymbols]);
             [self resizeDrawable];
         }
         [self renderOnEvent];
