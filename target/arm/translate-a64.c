@@ -2470,7 +2470,12 @@ static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
         } else if (tb_cflags(s->base.tb) & CF_PARALLEL) {
             if (!HAVE_CMPXCHG128) {
                 gen_helper_exit_atomic(cpu_env);
-                s->base.is_jmp = DISAS_NORETURN;
+                /*
+                 * Produce a result so we have a well-formed opcode
+                 * stream when the following (dead) code uses 'tmp'.
+                 * TCG will remove the dead ops for us.
+                 */
+                tcg_gen_movi_i64(tmp, 0);
             } else if (s->be_data == MO_LE) {
                 gen_helper_paired_cmpxchg64_le_parallel(tmp, cpu_env,
                                                         cpu_exclusive_addr,
@@ -9045,9 +9050,9 @@ static void handle_simd_shift_fpint_conv(DisasContext *s, bool is_scalar,
         }
     }
 
-    tcg_temp_free_ptr(tcg_fpstatus);
     tcg_temp_free_i32(tcg_shift);
     gen_helper_set_rmode(tcg_rmode, tcg_rmode, tcg_fpstatus);
+    tcg_temp_free_ptr(tcg_fpstatus);
     tcg_temp_free_i32(tcg_rmode);
 }
 
@@ -14962,12 +14967,12 @@ static void aarch64_tr_tb_stop(DisasContextBase *dcbase, CPUState *cpu)
 }
 
 static void aarch64_tr_disas_log(const DisasContextBase *dcbase,
-                                      CPUState *cpu)
+                                 CPUState *cpu, FILE *logfile)
 {
     DisasContext *dc = container_of(dcbase, DisasContext, base);
 
-    qemu_log("IN: %s\n", lookup_symbol(dc->base.pc_first));
-    log_target_disas(cpu, dc->base.pc_first, dc->base.tb->size);
+    fprintf(logfile, "IN: %s\n", lookup_symbol(dc->base.pc_first));
+    target_disas(logfile, cpu, dc->base.pc_first, dc->base.tb->size);
 }
 
 const TranslatorOps aarch64_translator_ops = {

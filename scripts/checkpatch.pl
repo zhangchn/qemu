@@ -223,11 +223,11 @@ our $Sparse	= qr{
 our $Attribute	= qr{
 			const|
 			volatile|
-			QEMU_NORETURN|
-			QEMU_WARN_UNUSED_RESULT|
-			QEMU_SENTINEL|
+			G_NORETURN|
+			G_GNUC_WARN_UNUSED_RESULT|
+			G_GNUC_NULL_TERMINATED|
 			QEMU_PACKED|
-			GCC_FMT_ATTR
+			G_GNUC_PRINTF
 		  }x;
 our $Modifier;
 our $Inline	= qr{inline};
@@ -307,7 +307,6 @@ our @typeList = (
 	qr{target_(?:u)?long},
 	qr{hwaddr},
         # external libraries
-	qr{xml${Ident}},
 	qr{xen\w+_handle},
 	# Glib definitions
 	qr{gchar},
@@ -2883,6 +2882,7 @@ sub process {
 				SCSIBusInfo|
 				SCSIReqOps|
 				Spice[A-Z][a-zA-Z0-9]*Interface|
+				TypeInfo|
 				USBDesc[A-Z][a-zA-Z0-9]*|
 				VhostOps|
 				VMStateDescription|
@@ -2974,10 +2974,10 @@ sub process {
 			ERROR("use memset() instead of bzero()\n" . $herecurr);
 		}
 		if ($line =~ /\bgetpagesize\(\)/) {
-			ERROR("use qemu_real_host_page_size instead of getpagesize()\n" . $herecurr);
+			ERROR("use qemu_real_host_page_size() instead of getpagesize()\n" . $herecurr);
 		}
 		if ($line =~ /\bsysconf\(_SC_PAGESIZE\)/) {
-			ERROR("use qemu_real_host_page_size instead of sysconf(_SC_PAGESIZE)\n" . $herecurr);
+			ERROR("use qemu_real_host_page_size() instead of sysconf(_SC_PAGESIZE)\n" . $herecurr);
 		}
 		my $non_exit_glib_asserts = qr{g_assert_cmpstr|
 						g_assert_cmpint|

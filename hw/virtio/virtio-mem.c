@@ -11,7 +11,6 @@
  */
 
 #include "qemu/osdep.h"
-#include "qemu-common.h"
 #include "qemu/iov.h"
 #include "qemu/cutils.h"
 #include "qemu/error-report.h"
@@ -46,13 +45,24 @@
  */
 #define VIRTIO_MEM_MIN_BLOCK_SIZE ((uint32_t)(1 * MiB))
 
-#if defined(__x86_64__) || defined(__arm__) || defined(__aarch64__) || \
-    defined(__powerpc64__)
-#define VIRTIO_MEM_DEFAULT_THP_SIZE ((uint32_t)(2 * MiB))
-#else
-        /* fallback to 1 MiB (e.g., the THP size on s390x) */
-#define VIRTIO_MEM_DEFAULT_THP_SIZE VIRTIO_MEM_MIN_BLOCK_SIZE
+static uint32_t virtio_mem_default_thp_size(void)
+{
+    uint32_t default_thp_size = VIRTIO_MEM_MIN_BLOCK_SIZE;
+
+#if defined(__x86_64__) || defined(__arm__) || defined(__powerpc64__)
+    default_thp_size = 2 * MiB;
+#elif defined(__aarch64__)
+    if (qemu_real_host_page_size() == 4 * KiB) {
+        default_thp_size = 2 * MiB;
+    } else if (qemu_real_host_page_size() == 16 * KiB) {
+        default_thp_size = 32 * MiB;
+    } else if (qemu_real_host_page_size() == 64 * KiB) {
+        default_thp_size = 512 * MiB;
+    }
 #endif
+
+    return default_thp_size;
+}
 
 /*
  * We want to have a reasonable default block size such that
@@ -86,11 +96,8 @@ static uint32_t virtio_mem_thp_size(void)
     if (g_file_get_contents(HPAGE_PMD_SIZE_PATH, &content, NULL, NULL) &&
         !qemu_strtou64(content, &endptr, 0, &tmp) &&
         (!endptr || *endptr == '\n')) {
-        /*
-         * Sanity-check the value, if it's too big (e.g., aarch64 with 64k base
-         * pages) or weird, fallback to something smaller.
-         */
-        if (!tmp || !is_power_of_2(tmp) || tmp > 16 * MiB) {
+        /* Sanity-check the value and fallback to something reasonable. */
+        if (!tmp || !is_power_of_2(tmp)) {
             warn_report("Read unsupported THP size: %" PRIx64, tmp);
         } else {
             thp_size = tmp;
@@ -98,7 +105,7 @@ static uint32_t virtio_mem_thp_size(void)
     }
 
     if (!thp_size) {
-        thp_size = VIRTIO_MEM_DEFAULT_THP_SIZE;
+        thp_size = virtio_mem_default_thp_size();
         warn_report("Could not detect THP size, falling back to %" PRIx64
                     "  MiB.", thp_size / MiB);
     }
@@ -112,7 +119,7 @@ static uint64_t virtio_mem_default_block_size(RAMBlock *rb)
     const uint64_t page_size = qemu_ram_pagesize(rb);
 
     /* We can have hugetlbfs with a page size smaller than the THP size. */
-    if (page_size == qemu_real_host_page_size) {
+    if (page_size == qemu_real_host_page_size()) {
         return MAX(page_size, virtio_mem_thp_size());
     }
     return MAX(page_size, VIRTIO_MEM_MIN_BLOCK_SIZE);
@@ -127,7 +134,7 @@ static bool virtio_mem_has_shared_zeropage(RAMBlock *rb)
      * fresh page, consuming actual memory.
      */
     return !qemu_ram_is_shared(rb) && rb->fd < 0 &&
-           qemu_ram_pagesize(rb) == qemu_real_host_page_size;
+           qemu_ram_pagesize(rb) == qemu_real_host_page_size();
 }
 #endif /* VIRTIO_MEM_HAS_LEGACY_GUESTS */
 
@@ -138,7 +145,7 @@ static bool virtio_mem_has_shared_zeropage(RAMBlock *rb)
  * The memory block size corresponds mostly to the section size.
  *
  * This allows e.g., to add 20MB with a section size of 128MB on x86_64, and
- * a section size of 1GB on arm64 (as long as the start address is properly
+ * a section size of 512MB on arm64 (as long as the start address is properly
  * aligned, similar to ordinary DIMMs).
  *
  * We can change this at any time and maybe even make it configurable if
@@ -147,6 +154,8 @@ static bool virtio_mem_has_shared_zeropage(RAMBlock *rb)
  */
 #if defined(TARGET_X86_64) || defined(TARGET_I386)
 #define VIRTIO_MEM_USABLE_EXTENT (2 * (128 * MiB))
+#elif defined(TARGET_ARM)
+#define VIRTIO_MEM_USABLE_EXTENT (2 * (512 * MiB))
 #else
 #error VIRTIO_MEM_USABLE_EXTENT not defined
 #endif

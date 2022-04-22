@@ -2872,7 +2872,7 @@ static TCGv_i64 load_last_active(DisasContext *s, TCGv_i32 last,
      * The final adjustment for the vector register base
      * is added via constant offset to the load.
      */
-#ifdef HOST_WORDS_BIGENDIAN
+#if HOST_BIG_ENDIAN
     /* Adjust for element ordering.  See vec_reg_offset.  */
     if (esz < 3) {
         tcg_gen_xori_i32(last, last, 8 - (1 << esz));
@@ -5711,7 +5711,7 @@ static void do_ldrq(DisasContext *s, int zt, int pg, TCGv_i64 addr, int dtype)
          * for this load operation.
          */
         TCGv_i64 tmp = tcg_temp_new_i64();
-#ifdef HOST_WORDS_BIGENDIAN
+#if HOST_BIG_ENDIAN
         poff += 6;
 #endif
         tcg_gen_ld16u_i64(tmp, cpu_env, poff);
@@ -5790,7 +5790,7 @@ static void do_ldro(DisasContext *s, int zt, int pg, TCGv_i64 addr, int dtype)
          * for this load operation.
          */
         TCGv_i64 tmp = tcg_temp_new_i64();
-#ifdef HOST_WORDS_BIGENDIAN
+#if HOST_BIG_ENDIAN
         poff += 4;
 #endif
         tcg_gen_ld32u_i64(tmp, cpu_env, poff);
@@ -6487,10 +6487,33 @@ static bool trans_LD1_zpiz(DisasContext *s, arg_LD1_zpiz *a)
 
 static bool trans_LDNT1_zprz(DisasContext *s, arg_LD1_zprz *a)
 {
+    gen_helper_gvec_mem_scatter *fn = NULL;
+    bool be = s->be_data == MO_BE;
+    bool mte = s->mte_active[0];
+
+    if (a->esz < a->msz + !a->u) {
+        return false;
+    }
     if (!dc_isar_feature(aa64_sve2, s)) {
         return false;
     }
-    return trans_LD1_zprz(s, a);
+    if (!sve_access_check(s)) {
+        return true;
+    }
+
+    switch (a->esz) {
+    case MO_32:
+        fn = gather_load_fn32[mte][be][0][0][a->u][a->msz];
+        break;
+    case MO_64:
+        fn = gather_load_fn64[mte][be][0][2][a->u][a->msz];
+        break;
+    }
+    assert(fn != NULL);
+
+    do_mem_zpz(s, a->rd, a->pg, a->rn, 0,
+               cpu_reg(s, a->rm), a->msz, false, fn);
+    return true;
 }
 
 /* Indexed by [mte][be][xs][msz].  */
@@ -6647,10 +6670,34 @@ static bool trans_ST1_zpiz(DisasContext *s, arg_ST1_zpiz *a)
 
 static bool trans_STNT1_zprz(DisasContext *s, arg_ST1_zprz *a)
 {
+    gen_helper_gvec_mem_scatter *fn;
+    bool be = s->be_data == MO_BE;
+    bool mte = s->mte_active[0];
+
+    if (a->esz < a->msz) {
+        return false;
+    }
     if (!dc_isar_feature(aa64_sve2, s)) {
         return false;
     }
-    return trans_ST1_zprz(s, a);
+    if (!sve_access_check(s)) {
+        return true;
+    }
+
+    switch (a->esz) {
+    case MO_32:
+        fn = scatter_store_fn32[mte][be][0][a->msz];
+        break;
+    case MO_64:
+        fn = scatter_store_fn64[mte][be][2][a->msz];
+        break;
+    default:
+        g_assert_not_reached();
+    }
+
+    do_mem_zpz(s, a->rd, a->pg, a->rn, 0,
+               cpu_reg(s, a->rm), a->msz, true, fn);
+    return true;
 }
 
 /*

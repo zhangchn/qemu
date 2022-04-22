@@ -18,7 +18,6 @@
  */
 
 #include "qemu/osdep.h"
-#include "qemu-common.h"
 #include "qapi/error.h"
 #include "qapi/qapi-visit-sockets.h"
 #include "qemu/module.h"
@@ -681,9 +680,9 @@ qio_channel_socket_set_delay(QIOChannel *ioc,
     QIOChannelSocket *sioc = QIO_CHANNEL_SOCKET(ioc);
     int v = enabled ? 0 : 1;
 
-    qemu_setsockopt(sioc->fd,
-                    IPPROTO_TCP, TCP_NODELAY,
-                    &v, sizeof(v));
+    setsockopt(sioc->fd,
+               IPPROTO_TCP, TCP_NODELAY,
+               &v, sizeof(v));
 }
 
 

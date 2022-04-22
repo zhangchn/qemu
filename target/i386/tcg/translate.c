@@ -359,7 +359,7 @@ static void gen_update_cc_op(DisasContext *s)
 
 #endif /* !TARGET_X86_64 */
 
-#if defined(HOST_WORDS_BIGENDIAN)
+#if HOST_BIG_ENDIAN
 #define REG_B_OFFSET (sizeof(target_ulong) - 1)
 #define REG_H_OFFSET (sizeof(target_ulong) - 2)
 #define REG_W_OFFSET (sizeof(target_ulong) - 2)
@@ -2580,15 +2580,17 @@ static void gen_unknown_opcode(CPUX86State *env, DisasContext *s)
     gen_illegal_opcode(s);
 
     if (qemu_loglevel_mask(LOG_UNIMP)) {
-        FILE *logfile = qemu_log_lock();
-        target_ulong pc = s->pc_start, end = s->pc;
+        FILE *logfile = qemu_log_trylock();
+        if (logfile) {
+            target_ulong pc = s->pc_start, end = s->pc;
 
-        qemu_log("ILLOPC: " TARGET_FMT_lx ":", pc);
-        for (; pc < end; ++pc) {
-            qemu_log(" %02x", cpu_ldub_code(env, pc));
+            fprintf(logfile, "ILLOPC: " TARGET_FMT_lx ":", pc);
+            for (; pc < end; ++pc) {
+                fprintf(logfile, " %02x", cpu_ldub_code(env, pc));
+            }
+            fprintf(logfile, "\n");
+            qemu_log_unlock(logfile);
         }
-        qemu_log("\n");
-        qemu_log_unlock(logfile);
     }
 }
 
@@ -4509,10 +4511,8 @@ static void gen_sse(CPUX86State *env, DisasContext *s, int b,
             sse_fn_ppi(s->ptr0, s->ptr1, tcg_const_i32(val));
             break;
         case 0xc2:
-            /* compare insns */
-            val = x86_ldub_code(env, s);
-            if (val >= 8)
-                goto unknown_op;
+            /* compare insns, bits 7:3 (7:5 for AVX) are ignored */
+            val = x86_ldub_code(env, s) & 7;
             sse_fn_epp = sse_op_table4[val][b1];
 
             tcg_gen_addi_ptr(s->ptr0, cpu_env, op1_offset);
@@ -7382,6 +7382,9 @@ static target_ulong disas_insn(DisasContext *s, CPUState *cpu)
         case 0: /* sldt */
             if (!PE(s) || VM86(s))
                 goto illegal_op;
+            if (s->flags & HF_UMIP_MASK && !check_cpl0(s)) {
+                break;
+            }
             gen_svm_check_intercept(s, SVM_EXIT_LDTR_READ);
             tcg_gen_ld32u_tl(s->T0, cpu_env,
                              offsetof(CPUX86State, ldt.selector));
@@ -7401,6 +7404,9 @@ static target_ulong disas_insn(DisasContext *s, CPUState *cpu)
         case 1: /* str */
             if (!PE(s) || VM86(s))
                 goto illegal_op;
+            if (s->flags & HF_UMIP_MASK && !check_cpl0(s)) {
+                break;
+            }
             gen_svm_check_intercept(s, SVM_EXIT_TR_READ);
             tcg_gen_ld32u_tl(s->T0, cpu_env,
                              offsetof(CPUX86State, tr.selector));
@@ -7439,6 +7445,9 @@ static target_ulong disas_insn(DisasContext *s, CPUState *cpu)
         modrm = x86_ldub_code(env, s);
         switch (modrm) {
         CASE_MODRM_MEM_OP(0): /* sgdt */
+            if (s->flags & HF_UMIP_MASK && !check_cpl0(s)) {
+                break;
+            }
             gen_svm_check_intercept(s, SVM_EXIT_GDTR_READ);
             gen_lea_modrm(env, s, modrm);
             tcg_gen_ld32u_tl(s->T0,
@@ -7495,6 +7504,9 @@ static target_ulong disas_insn(DisasContext *s, CPUState *cpu)
             break;
 
         CASE_MODRM_MEM_OP(1): /* sidt */
+            if (s->flags & HF_UMIP_MASK && !check_cpl0(s)) {
+                break;
+            }
             gen_svm_check_intercept(s, SVM_EXIT_IDTR_READ);
             gen_lea_modrm(env, s, modrm);
             tcg_gen_ld32u_tl(s->T0, cpu_env, offsetof(CPUX86State, idt.limit));
@@ -7670,6 +7682,9 @@ static target_ulong disas_insn(DisasContext *s, CPUState *cpu)
             break;
 
         CASE_MODRM_OP(4): /* smsw */
+            if (s->flags & HF_UMIP_MASK && !check_cpl0(s)) {
+                break;
+            }
             gen_svm_check_intercept(s, SVM_EXIT_READ_CR0);
             tcg_gen_ld_tl(s->T0, cpu_env, offsetof(CPUX86State, cr[0]));
             /*
@@ -8675,12 +8690,12 @@ static void i386_tr_tb_stop(DisasContextBase *dcbase, CPUState *cpu)
 }
 
 static void i386_tr_disas_log(const DisasContextBase *dcbase,
-                              CPUState *cpu)
+                              CPUState *cpu, FILE *logfile)
 {
     DisasContext *dc = container_of(dcbase, DisasContext, base);
 
-    qemu_log("IN: %s\n", lookup_symbol(dc->base.pc_first));
-    log_target_disas(cpu, dc->base.pc_first, dc->base.tb->size);
+    fprintf(logfile, "IN: %s\n", lookup_symbol(dc->base.pc_first));
+    target_disas(logfile, cpu, dc->base.pc_first, dc->base.tb->size);
 }
 
 static const TranslatorOps i386_tr_ops = {

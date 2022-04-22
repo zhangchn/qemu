@@ -36,7 +36,7 @@ struct target_pt_regs {
 	abi_ulong link;
 	abi_ulong xer;
 	abi_ulong ccr;
-#if defined(TARGET_PPC64) && !defined(TARGET_ABI32)
+#if defined(TARGET_PPC64)
         abi_ulong softe;
 #else
 	abi_ulong mq;		/* 601 only (not used at present) */
@@ -58,8 +58,8 @@ struct target_revectored_struct {
  * flags masks
  */
 
-#if defined(TARGET_PPC64) && !defined(TARGET_ABI32)
-#ifdef TARGET_WORDS_BIGENDIAN
+#if defined(TARGET_PPC64)
+#if TARGET_BIG_ENDIAN
 #define UNAME_MACHINE "ppc64"
 #else
 #define UNAME_MACHINE "ppc64le"

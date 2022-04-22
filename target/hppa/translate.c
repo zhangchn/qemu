@@ -566,7 +566,7 @@ static void save_gpr(DisasContext *ctx, unsigned reg, TCGv_reg t)
     }
 }
 
-#ifdef HOST_WORDS_BIGENDIAN
+#if HOST_BIG_ENDIAN
 # define HI_OFS  0
 # define LO_OFS  4
 #else
@@ -2389,6 +2389,16 @@ static bool trans_reset(DisasContext *ctx, arg_reset *a)
     nullify_over(ctx);
     gen_helper_reset(cpu_env);
     ctx->base.is_jmp = DISAS_NORETURN;
+    return nullify_end(ctx);
+#endif
+}
+
+static bool trans_getshadowregs(DisasContext *ctx, arg_getshadowregs *a)
+{
+    CHECK_MOST_PRIVILEGED(EXCP_PRIV_OPR);
+#ifndef CONFIG_USER_ONLY
+    nullify_over(ctx);
+    gen_helper_getshadowregs(cpu_env);
     return nullify_end(ctx);
 #endif
 }
@@ -4295,29 +4305,30 @@ static void hppa_tr_tb_stop(DisasContextBase *dcbase, CPUState *cs)
     }
 }
 
-static void hppa_tr_disas_log(const DisasContextBase *dcbase, CPUState *cs)
+static void hppa_tr_disas_log(const DisasContextBase *dcbase,
+                              CPUState *cs, FILE *logfile)
 {
     target_ulong pc = dcbase->pc_first;
 
 #ifdef CONFIG_USER_ONLY
     switch (pc) {
     case 0x00:
-        qemu_log("IN:\n0x00000000:  (null)\n");
+        fprintf(logfile, "IN:\n0x00000000:  (null)\n");
         return;
     case 0xb0:
-        qemu_log("IN:\n0x000000b0:  light-weight-syscall\n");
+        fprintf(logfile, "IN:\n0x000000b0:  light-weight-syscall\n");
         return;
     case 0xe0:
-        qemu_log("IN:\n0x000000e0:  set-thread-pointer-syscall\n");
+        fprintf(logfile, "IN:\n0x000000e0:  set-thread-pointer-syscall\n");
         return;
     case 0x100:
-        qemu_log("IN:\n0x00000100:  syscall\n");
+        fprintf(logfile, "IN:\n0x00000100:  syscall\n");
         return;
     }
 #endif
 
-    qemu_log("IN: %s\n", lookup_symbol(pc));
-    log_target_disas(cs, pc, dcbase->tb->size);
+    fprintf(logfile, "IN: %s\n", lookup_symbol(pc));
+    target_disas(logfile, cs, pc, dcbase->tb->size);
 }
 
 static const TranslatorOps hppa_tr_ops = {

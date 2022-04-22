@@ -31,11 +31,11 @@
 
 #include <glib/gprintf.h>
 
-#include "qemu-common.h"
 #include "sysemu/sysemu.h"
 #include "trace.h"
 #include "qapi/error.h"
 #include "qemu/error-report.h"
+#include "qemu/madvise.h"
 #include "qemu/sockets.h"
 #include "qemu/thread.h"
 #include <libgen.h>
@@ -138,9 +138,8 @@ bool qemu_write_pidfile(const char *path, Error **errp)
             .l_len = 0,
         };
 
-        fd = qemu_open_old(path, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR);
+        fd = qemu_create(path, O_WRONLY, S_IRUSR | S_IWUSR, errp);
         if (fd == -1) {
-            error_setg_errno(errp, errno, "Cannot open pid file");
             return false;
         }
 
@@ -184,7 +183,7 @@ bool qemu_write_pidfile(const char *path, Error **errp)
     }
 
     snprintf(pidstr, sizeof(pidstr), FMT_pid "\n", getpid());
-    if (write(fd, pidstr, strlen(pidstr)) != strlen(pidstr)) {
+    if (qemu_write_full(fd, pidstr, strlen(pidstr)) != strlen(pidstr)) {
         error_setg(errp, "Failed to write pid file");
         goto fail_unlink;
     }
@@ -196,46 +195,6 @@ fail_unlink:
 fail_close:
     close(fd);
     return false;
-}
-
-void *qemu_oom_check(void *ptr)
-{
-    if (ptr == NULL) {
-        fprintf(stderr, "Failed to allocate memory: %s\n", strerror(errno));
-        abort();
-    }
-    return ptr;
-}
-
-void *qemu_try_memalign(size_t alignment, size_t size)
-{
-    void *ptr;
-
-    if (alignment < sizeof(void*)) {
-        alignment = sizeof(void*);
-    } else {
-        g_assert(is_power_of_2(alignment));
-    }
-
-#if defined(CONFIG_POSIX_MEMALIGN)
-    int ret;
-    ret = posix_memalign(&ptr, alignment, size);
-    if (ret != 0) {
-        errno = ret;
-        ptr = NULL;
-    }
-#elif defined(CONFIG_BSD)
-    ptr = valloc(size);
-#else
-    ptr = memalign(alignment, size);
-#endif
-    trace_qemu_memalign(alignment, size, ptr);
-    return ptr;
-}
-
-void *qemu_memalign(size_t alignment, size_t size)
-{
-    return qemu_oom_check(qemu_try_memalign(alignment, size));
 }
 
 /* alloc shared memory pages */
@@ -257,12 +216,6 @@ void *qemu_anon_ram_alloc(size_t size, uint64_t *alignment, bool shared,
 
     trace_qemu_anon_ram_alloc(size, ptr);
     return ptr;
-}
-
-void qemu_vfree(void *ptr)
-{
-    trace_qemu_vfree(ptr);
-    free(ptr);
 }
 
 void qemu_anon_ram_free(void *ptr, size_t size)
@@ -344,12 +297,9 @@ int qemu_pipe(int pipefd[2])
 }
 
 char *
-qemu_get_local_state_pathname(const char *relative_pathname)
+qemu_get_local_state_dir(void)
 {
-    g_autofree char *dir = g_strdup_printf("%s/%s",
-                                           CONFIG_QEMU_LOCALSTATEDIR,
-                                           relative_pathname);
-    return get_relocated_path(dir);
+    return get_relocated_path(CONFIG_QEMU_LOCALSTATEDIR);
 }
 
 void qemu_set_tty_echo(int fd, bool echo)
@@ -683,6 +633,7 @@ void os_mem_prealloc(int fd, char *area, size_t memory, int smp_cpus,
 
         ret = sigaction(SIGBUS, &act, &sigbus_oldact);
         if (ret) {
+            qemu_mutex_unlock(&sigbus_mutex);
             error_setg_errno(errp, errno,
                 "os_mem_prealloc: failed to install signal handler");
             return;
@@ -811,7 +762,7 @@ void *qemu_alloc_stack(size_t *sz)
 #ifdef CONFIG_DEBUG_STACK_USAGE
     void *ptr2;
 #endif
-    size_t pagesz = qemu_real_host_page_size;
+    size_t pagesz = qemu_real_host_page_size();
 #ifdef _SC_THREAD_STACK_MIN
     /* avoid stacks smaller than _SC_THREAD_STACK_MIN */
     long min_stack_sz = sysconf(_SC_THREAD_STACK_MIN);
@@ -873,7 +824,7 @@ void qemu_free_stack(void *stack, size_t sz)
     unsigned int usage;
     void *ptr;
 
-    for (ptr = stack + qemu_real_host_page_size; ptr < stack + sz;
+    for (ptr = stack + qemu_real_host_page_size(); ptr < stack + sz;
          ptr += sizeof(uint32_t)) {
         if (*(uint32_t *)ptr != 0xdeadbeaf) {
             break;
@@ -931,52 +882,50 @@ void sigaction_invoke(struct sigaction *action,
     action->sa_sigaction(info->ssi_signo, &si, NULL);
 }
 
-#ifndef HOST_NAME_MAX
-# ifdef _POSIX_HOST_NAME_MAX
-#  define HOST_NAME_MAX _POSIX_HOST_NAME_MAX
-# else
-#  define HOST_NAME_MAX 255
-# endif
-#endif
-
-char *qemu_get_host_name(Error **errp)
-{
-    long len = -1;
-    g_autofree char *hostname = NULL;
-
-#ifdef _SC_HOST_NAME_MAX
-    len = sysconf(_SC_HOST_NAME_MAX);
-#endif /* _SC_HOST_NAME_MAX */
-
-    if (len < 0) {
-        len = HOST_NAME_MAX;
-    }
-
-    /* Unfortunately, gethostname() below does not guarantee a
-     * NULL terminated string. Therefore, allocate one byte more
-     * to be sure. */
-    hostname = g_new0(char, len + 1);
-
-    if (gethostname(hostname, len) < 0) {
-        error_setg_errno(errp, errno,
-                         "cannot get hostname");
-        return NULL;
-    }
-
-    return g_steal_pointer(&hostname);
-}
-
 size_t qemu_get_host_physmem(void)
 {
 #ifdef _SC_PHYS_PAGES
     long pages = sysconf(_SC_PHYS_PAGES);
     if (pages > 0) {
-        if (pages > SIZE_MAX / qemu_real_host_page_size) {
+        if (pages > SIZE_MAX / qemu_real_host_page_size()) {
             return SIZE_MAX;
         } else {
-            return pages * qemu_real_host_page_size;
+            return pages * qemu_real_host_page_size();
         }
     }
 #endif
     return 0;
+}
+
+/* Sets a specific flag */
+int fcntl_setfl(int fd, int flag)
+{
+    int flags;
+
+    flags = fcntl(fd, F_GETFL);
+    if (flags == -1) {
+        return -errno;
+    }
+    if (fcntl(fd, F_SETFL, flags | flag) == -1) {
+        return -errno;
+    }
+    return 0;
+}
+
+int qemu_msync(void *addr, size_t length, int fd)
+{
+    size_t align_mask = ~(qemu_real_host_page_size() - 1);
+
+    /**
+     * There are no strict reqs as per the length of mapping
+     * to be synced. Still the length needs to follow the address
+     * alignment changes. Additionally - round the size to the multiple
+     * of PAGE_SIZE
+     */
+    length += ((uintptr_t)addr & (qemu_real_host_page_size() - 1));
+    length = (length + ~align_mask) & align_mask;
+
+    addr = (void *)((uintptr_t)addr & align_mask);
+
+    return msync(addr, length, MS_SYNC);
 }

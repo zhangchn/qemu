@@ -23,10 +23,11 @@
  */
 
 #include "qemu/osdep.h"
-#include "qemu-common.h"
+#include "qemu/help-texts.h"
 #include "qemu/datadir.h"
 #include "qemu/units.h"
 #include "exec/cpu-common.h"
+#include "exec/page-vary.h"
 #include "hw/qdev-properties.h"
 #include "qapi/compat-policy.h"
 #include "qapi/error.h"
@@ -36,6 +37,7 @@
 #include "qemu-version.h"
 #include "qemu/cutils.h"
 #include "qemu/help_option.h"
+#include "qemu/hw-version.h"
 #include "qemu/uuid.h"
 #include "sysemu/reset.h"
 #include "sysemu/runstate.h"
@@ -123,9 +125,11 @@
 #include "qapi/qapi-visit-qom.h"
 #include "qapi/qapi-commands-ui.h"
 #include "qapi/qmp/qdict.h"
+#include "block/qdict.h"
 #include "qapi/qmp/qerror.h"
 #include "sysemu/iothread.h"
 #include "qemu/guest-random.h"
+#include "qemu/keyval.h"
 
 #include "config-host.h"
 
@@ -835,7 +839,7 @@ static void help(int exitcode)
     version();
     printf("usage: %s [options] [disk_image]\n\n"
            "'disk_image' is a raw hard disk image for IDE hard disk 0\n\n",
-            error_get_progname());
+            g_get_prgname());
 
 #define DEF(option, opt_arg, opt_enum, opt_help, arch_mask)    \
     if ((arch_mask) & arch_type)                               \
@@ -1960,7 +1964,7 @@ static void qemu_create_early_backends(void)
     object_option_foreach_add(object_create_early);
 
     /* spice needs the timers to be initialized by this point */
-    /* spice must initialize before audio as it changes the default auiodev */
+    /* spice must initialize before audio as it changes the default audiodev */
     /* spice must initialize before chardevs (for spicevmc and spiceport) */
     qemu_spice.init();
 
@@ -2558,19 +2562,16 @@ static void qemu_process_early_options(void)
 #endif
 
     /* Open the logfile at this point and set the log mask if necessary.  */
-    if (log_file) {
-        qemu_set_log_filename(log_file, &error_fatal);
-    }
-    if (log_mask) {
-        int mask;
-        mask = qemu_str_to_log_mask(log_mask);
-        if (!mask) {
-            qemu_print_log_usage(stdout);
-            exit(1);
+    {
+        int mask = 0;
+        if (log_mask) {
+            mask = qemu_str_to_log_mask(log_mask);
+            if (!mask) {
+                qemu_print_log_usage(stdout);
+                exit(1);
+            }
         }
-        qemu_set_log(mask);
-    } else {
-        qemu_set_log(0);
+        qemu_set_log_filename_flags(log_file, mask, &error_fatal);
     }
 
     qemu_add_default_firmwarepath();
@@ -2814,10 +2815,7 @@ void qemu_init(int argc, char **argv, char **envp)
     error_init(argv[0]);
     qemu_init_exec_dir(argv[0]);
 
-#ifdef CONFIG_MODULES
-    module_init_info(qemu_modinfo);
-    module_allow_arch(TARGET_NAME);
-#endif
+    qemu_init_arch_modules();
 
     qemu_init_subsystems();
 
@@ -3539,6 +3537,7 @@ void qemu_init(int argc, char **argv, char **envp)
             case QEMU_OPTION_readconfig:
                 qemu_read_config_file(optarg, qemu_parse_config_group, &error_fatal);
                 break;
+#ifdef CONFIG_SPICE
             case QEMU_OPTION_spice:
                 olist = qemu_find_opts_err("spice", NULL);
                 if (!olist) {
@@ -3551,6 +3550,7 @@ void qemu_init(int argc, char **argv, char **envp)
                 }
                 display_remote++;
                 break;
+#endif
             case QEMU_OPTION_writeconfig:
                 {
                     FILE *fp;
