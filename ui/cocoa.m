@@ -1558,6 +1558,7 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
         [cocoaView showTitle];
     }
 }
+
 - (void)windowDidChangeScreen:(NSNotification *)notification
 {
     [cocoaView updateUIInfo];
