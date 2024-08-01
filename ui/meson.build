@@ -31,7 +31,7 @@ if host_os == 'linux'
 endif
 
 system_ss.add(when: cocoa, if_true: files('cocoa.m'))
-system_ss.add(when: metalkit, if_true: [files('metal.m'), metal, mps, quartzcore])
+system_ss.add(when: metal, if_true: [files('metal.m'), metal, mps, quartzcore])
 system_ss.add(when: avfoundation, if_true: [avfoundation, coremedia])
 
 if cocoa.found()
