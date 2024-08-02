@@ -326,7 +326,6 @@ static void handleAnyDeviceErrors(Error * err)
     float currentContentsScale;
     BOOL isHostResizing;
     BOOL windowIsMoving;
-    NSTimer *hideTitleTimer;
     AVAssetWriter *recorder;
     AVAssetWriterInput *recorderInput;
     AVAssetWriterInputPixelBufferAdaptor *recorderInputAdaptor;
@@ -411,8 +410,6 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 #if MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_VERSION_14_0
         [self setClipsToBounds:YES];
 #endif
-
-        hideTitleTimer = nil;
     }
     return self;
 }
@@ -1262,54 +1259,10 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
         [[self window] setTitle:@"QEMU - (Press  " UC_CTRL_KEY " " UC_ALT_KEY " G  to release Mouse)"];
     [self hideCursor];
     CGAssociateMouseAndMouseCursorPosition(isAbsoluteEnabled);
-    [self showTitleMomentarily];
     isMouseGrabbed = TRUE; // while isMouseGrabbed = TRUE, QemuCocoaApp sends all events to [cocoaView handleEvent:]
 }
 
-- (void) showTitle
-{
-    NSWindowButton buttonTypes[] = {NSWindowCloseButton, NSWindowMiniaturizeButton, NSWindowZoomButton};
-    int idx;
-    for (idx = 0; idx < 3; idx ++) {
-        [normalWindow standardWindowButton:buttonTypes[idx]].hidden = NO;
-    }
-    normalWindow.titleVisibility = NSWindowTitleVisible;
-    normalWindow.titlebarAppearsTransparent = NO;
-}
 
-- (void) hideTitle
-{
-    normalWindow.titleVisibility = NSWindowTitleHidden;
-    NSWindowButton buttonTypes[] = {NSWindowCloseButton, NSWindowMiniaturizeButton, NSWindowZoomButton};
-    int idx;
-    for (idx = 0; idx < 3; idx ++) {
-        [normalWindow standardWindowButton:buttonTypes[idx]].hidden = YES;
-    }
-    normalWindow.titlebarAppearsTransparent = YES;
-}
-
-- (void) hideTitleWithDelay:(NSTimer *)timer
-{
-    if (normalWindow.isKeyWindow && !windowIsMoving) {
-        [self hideTitle];
-        hideTitleTimer = nil;
-    } else {
-        [timer invalidate];
-        [self showTitleMomentarily];
-    }
-}
-
-- (void) showTitleMomentarily 
-{
-    [self showTitle];
-    [hideTitleTimer invalidate];
-
-    hideTitleTimer = [NSTimer scheduledTimerWithTimeInterval:3.0
-                                                      target:self
-                                                    selector:@selector(hideTitleWithDelay:)
-                                                    userInfo:nil
-                                                     repeats:NO];
-}
 
 - (void) ungrabMouse
 {
@@ -1320,7 +1273,6 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     else
         [[self window] setTitle:@"QEMU"];
     [self unhideCursor];
-    [self showTitleMomentarily];
     CGAssociateMouseAndMouseCursorPosition(TRUE);
     isMouseGrabbed = FALSE;
     [self raiseAllButtons];
@@ -1362,7 +1314,6 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 - (void) setCursorVisible:(BOOL)visible {cursorVisible = visible;}
 - (void) setWindowMoving:(BOOL)moving {
     windowIsMoving = moving;
-    [self showTitleMomentarily];
 }
 
 /*
@@ -1457,18 +1408,6 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     }
 }
 
-- (void) showTitle
-{
-    [super showTitle];
-    [self renderOnEvent];
-}
-
-- (void) hideTitle
-{
-    [super hideTitle];
-}
-
-
 - (void)render
 {
     @synchronized(_metalLayer)
@@ -1527,7 +1466,7 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     // NSLog(@"setFrameSize: %@ -> %@", NSStringFromSize([self bounds].size), NSStringFromSize(size));
     [super setFrameSize:size];
 
-    if ([self.window isEqual:normalWindow] && !isHostResizing) {
+    if (!isHostResizing) {
         if (frameSizeChanged) {
             [self resizeDrawable];
         }
@@ -1693,20 +1632,6 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     return [self verifyQuit];
 }
 
-- (void)windowDidBecomeKey:(NSNotification *)note
-{
-    if ([note.object isEqual:normalWindow]) {
-        [cocoaView showTitleMomentarily];
-    }
-}
-
-- (void)windowWillResignKey:(NSNotification *)note
-{
-    if ([note.object isEqual:normalWindow]) {
-        [cocoaView showTitle];
-    }
-}
-
 - (void)windowDidChangeScreen:(NSNotification *)notification
 {
     [cocoaView updateUIInfo];
@@ -1733,36 +1658,21 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
 
 - (void)windowWillMove:(NSNotification *)note
 {
-    if ([note.object isEqual:normalWindow]) {
-        [cocoaView setWindowMoving:YES];
-    }
+    [cocoaView setWindowMoving:YES];
 }
 
 - (void)windowWillStartLiveResize:(NSNotification *)notification
 {
     [cocoaView setHostResizing:YES];
-    [cocoaView hideTitle];
 }
 
 - (void)windowDidEndLiveResize:(NSNotification *)notification
 {
     [cocoaView setHostResizing:NO];
-    [cocoaView showTitleMomentarily];
     NSWindow *window = notification.object;
     if ([window.contentView isEqual:cocoaView]) {
         [cocoaView updateBounds];
-	[cocoaView frameUpdated];
     }
-}
-
-- (void)windowWillEnterFullScreen:(NSNotification *)notification
-{
-    [cocoaView hideTitle];
-}
-
-- (void)windowWillExitFullScreen:(NSNotification *)notification
-{
-    [cocoaView showTitleMomentarily];
 }
 
 - (void)windowWillMiniaturize:(NSNotification *)notification
