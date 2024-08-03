@@ -319,6 +319,20 @@ static void handleAnyDeviceErrors(Error * err)
      */
     BOOL isMouseGrabbed;
     BOOL isAbsoluteEnabled;
+    CGRect cursorRect;
+    CGImageRef cursorImage;
+    BOOL cursorVisible;
+    float currentContentsScale;
+    BOOL isHostResizing;
+    BOOL windowIsMoving;
+    NSTimer *hideTitleTimer;
+    AVAssetWriter *recorder;
+    AVAssetWriterInput *recorderInput;
+    AVAssetWriterInputPixelBufferAdaptor *recorderInputAdaptor;
+    CGSize recordingSize;
+    BOOL isRecording;
+    NSDate *recordingStart;
+    CVPixelBufferRef compressionInBuffer;
     CFMachPortRef eventsTap;
     CGRect cursorRect;
     CGImageRef cursorImage;
@@ -1259,10 +1273,9 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
         [[self window] setTitle:@"QEMU - (Press  " UC_CTRL_KEY " " UC_ALT_KEY " G  to release Mouse)"];
     [self hideCursor];
     CGAssociateMouseAndMouseCursorPosition(isAbsoluteEnabled);
+    [self showTitleMomentarily];
     isMouseGrabbed = TRUE; // while isMouseGrabbed = TRUE, QemuCocoaApp sends all events to [cocoaView handleEvent:]
 }
-
-
 
 - (void) ungrabMouse
 {
@@ -1273,6 +1286,7 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     else
         [[self window] setTitle:@"QEMU"];
     [self unhideCursor];
+    [self showTitleMomentarily];
     CGAssociateMouseAndMouseCursorPosition(TRUE);
     isMouseGrabbed = FALSE;
     [self raiseAllButtons];
@@ -1358,7 +1372,6 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     }
     return self;
 }
-
 
 - (CALayer *)makeBackingLayer
 {
@@ -1632,6 +1645,19 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     return [self verifyQuit];
 }
 
+- (void)windowDidBecomeKey:(NSNotification *)note
+{
+    if ([note.object isEqual:normalWindow]) {
+        [cocoaView showTitleMomentarily];
+    }
+}
+
+- (void)windowDidResignKey:(NSNotification *)note
+{
+    if ([note.object isEqual:normalWindow]) {
+        [cocoaView showTitle];
+    }
+}
 - (void)windowDidChangeScreen:(NSNotification *)notification
 {
     [cocoaView updateUIInfo];
@@ -1648,13 +1674,11 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     [cocoaView ungrabMouse];
 }
 
-/*
 - (void)windowDidResize:(NSNotification *)notification
 {
     [cocoaView updateBounds];
     [cocoaView updateUIInfo];
 }
-*/
 
 - (void)windowWillMove:(NSNotification *)note
 {
@@ -2391,17 +2415,6 @@ static void cocoa_update(DisplayChangeListener *dcl,
 
     dispatch_async(dispatch_get_main_queue(), ^{
         NSRect rect = NSMakeRect(x, [cocoaView gscreen].height - y - h, w, h);
-	/*
-        if ([cocoaView cdx] == 1.0) {
-            rect = NSMakeRect(x, [cocoaView gscreen].height - y - h, w, h);
-        } else {
-            rect = NSMakeRect(
-                x * [cocoaView cdx],
-                ([cocoaView gscreen].height - y - h) * [cocoaView cdy],
-                w * [cocoaView cdx],
-                h * [cocoaView cdy]);
-        }
-	*/
         [cocoaView setNeedsDisplayInRect:rect];
     });
     [pool release];
