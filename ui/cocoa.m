@@ -25,8 +25,8 @@
 #include "qemu/osdep.h"
 
 #import <Cocoa/Cocoa.h>
-#import <QuartzCore/CAMetalLayer.h>
 #import <AVFoundation/AVFoundation.h>
+#import <QuartzCore/QuartzCore.h>
 #include <crt_externs.h>
 
 #include "qemu/help-texts.h"
@@ -85,11 +85,8 @@ static void cocoa_switch(DisplayChangeListener *dcl,
                          DisplaySurface *surface);
 
 static void cocoa_refresh(DisplayChangeListener *dcl);
-
-static void cocoa_mouse_set(DisplayChangeListener *dcl,
-                            int x, int y, int visible);
-
-static void cocoa_cursor_define(DisplayChangeListener *dcl, QEMUCursor *c);
+static void cocoa_mouse_set(DisplayChangeListener *dcl, int x, int y, bool on);
+static void cocoa_cursor_define(DisplayChangeListener *dcl, QEMUCursor *cursor);
 
 static const DisplayChangeListenerOps dcl_ops = {
     .dpy_name          = "cocoa",
@@ -334,6 +331,12 @@ static void handleAnyDeviceErrors(Error * err)
     NSDate *recordingStart;
     CVPixelBufferRef compressionInBuffer;
     CFMachPortRef eventsTap;
+    CGColorSpaceRef colorspace;
+    CALayer *cursorLayer;
+    QEMUCursor *cursor;
+    int mouseX;
+    int mouseY;
+    bool mouseOn;
 }
 - (void) switchSurface:(pixman_image_t *)image;
 - (void) grabMouse;
@@ -408,9 +411,16 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
         screen.bitsPerPixel = 32;
         screen.width = frameRect.size.width * currentContentsScale;
         screen.height = frameRect.size.height * currentContentsScale;
+        colorspace = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
 #if MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_VERSION_14_0
         [self setClipsToBounds:YES];
 #endif
+        cursorLayer = [[CALayer alloc] init];
+        [cursorLayer setAnchorPoint:CGPointMake(0, 1)];
+        [cursorLayer setAutoresizingMask:kCALayerMaxXMargin |
+                                         kCALayerMinYMargin];
+        [[self layer] addSublayer:cursorLayer];
+
     }
     return self;
 }
@@ -427,6 +437,9 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
         CFRelease(eventsTap);
     }
 
+    CGColorSpaceRelease(colorspace);
+    [cursorLayer release];
+    cursor_unref(cursor);
     [super dealloc];
 }
 
@@ -558,6 +571,72 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     }
 }
 
+- (void)setMouseX:(int)x y:(int)y on:(bool)on
+{
+    CGPoint position;
+
+    mouseX = x;
+    mouseY = y;
+    mouseOn = on;
+
+    position.x = mouseX;
+    position.y = screen.height - mouseY;
+
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    [cursorLayer setPosition:position];
+    [cursorLayer setHidden:!mouseOn];
+    [CATransaction commit];
+}
+
+- (void)setCursor:(QEMUCursor *)given_cursor
+{
+    CGDataProviderRef provider;
+    CGImageRef image;
+    CGRect bounds = CGRectZero;
+
+    cursor_unref(cursor);
+    cursor = given_cursor;
+
+    if (!cursor) {
+        return;
+    }
+
+    cursor_ref(cursor);
+
+    bounds.size.width = cursor->width;
+    bounds.size.height = cursor->height;
+
+    provider = CGDataProviderCreateWithData(
+        NULL,
+        cursor->data,
+        cursor->width * cursor->height * 4,
+        NULL
+    );
+
+    image = CGImageCreate(
+        cursor->width, //width
+        cursor->height, //height
+        8, //bitsPerComponent
+        32, //bitsPerPixel
+        cursor->width * 4, //bytesPerRow
+        colorspace, //colorspace
+        kCGBitmapByteOrder32Little | kCGImageAlphaFirst, //bitmapInfo
+        provider, //provider
+        NULL, //decode
+        0, //interpolate
+        kCGRenderingIntentDefault //intent
+    );
+
+    CGDataProviderRelease(provider);
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    [cursorLayer setBounds:bounds];
+    [cursorLayer setContents:(id)image];
+    [CATransaction commit];
+    CGImageRelease(image);
+}
+
 - (void) drawRect:(NSRect) rect
 {
     COCOA_DEBUG("QemuCocoaView: drawRect\n");
@@ -591,7 +670,7 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
             DIV_ROUND_UP(bitsPerPixel, 8) * 2, //bitsPerComponent
             bitsPerPixel, //bitsPerPixel
             stride, //bytesPerRow
-            CGColorSpaceCreateWithName(kCGColorSpaceSRGB), //colorspace
+            colorspace, //colorspace
             kCGBitmapByteOrder32Little | kCGImageAlphaNoneSkipFirst, //bitmapInfo
             dataProviderRef, //provider
             NULL, //decode
@@ -2435,69 +2514,32 @@ static void cocoa_refresh(DisplayChangeListener *dcl)
 static void cocoa_cursor_define(DisplayChangeListener *dcl, QEMUCursor *c)
 {
 
+#if COCOA_METAL_VIEW
     COCOA_DEBUG("qemu_cocoa: cocoa_cursor_define\n");
     int bitsPerComponent = [cocoaView gscreen].bitsPerComponent;
     float contentsScale = [cocoaView currentContentsScale];
     int stride = c->width * bitsPerComponent / contentsScale;
 
-#if COCOA_METAL_VIEW
     [renderer defineCursorTextureWithBuffer:c->data width:c->width height:c->height stride:stride];
 #else
-    int bitsPerPixel = [cocoaView gscreen].bitsPerPixel;
-    NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
-    CGDataProviderRef provider = CGDataProviderCreateWithData(NULL, c->data, c->width * 4 * c->height, NULL);
-
-    CGImageRef img = CGImageCreate(
-        c->width,
-        c->height,
-        bitsPerComponent,
-        bitsPerPixel,
-        stride,
-        CGColorSpaceCreateWithName(kCGColorSpaceGenericRGB), //colorspace
-        kCGBitmapByteOrder32Little | kCGImageAlphaFirst,
-        provider,
-        NULL,
-        0,
-        kCGRenderingIntentDefault
-    );
-
-    CGDataProviderRelease(provider);
-    CGFloat width = c->width;
-    CGFloat height = c->height;
     dispatch_async(dispatch_get_main_queue(), ^{
-        [cocoaView setCursorImage:img];
-        CGRect rect = [cocoaView cursorRect];
-        rect.size = CGSizeMake(width / contentsScale, height / contentsScale);
-        [cocoaView setCursorRect:rect];
+        BQL_LOCK_GUARD();
+        [cocoaView setCursor:qemu_console_get_cursor(dcl->con)];
     });
-    [pool release];
 #endif
 }
 
 static void cocoa_mouse_set(DisplayChangeListener *dcl,
-                            int x, int y, int visible)
+                            int x, int y, bool on)
 {
 #if COCOA_METAL_VIEW
-    [renderer setCursorVisible:visible ? YES : NO x:x y:y];
+    [renderer setCursorVisible:on ? YES : NO x:x y:y];
     [(QemuMetalView *)cocoaView renderOnEvent];
-#else // Core Graphics based
-    NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];
 
-    COCOA_DEBUG("qemu_cocoa: cocoa_mouse_set\n");
+#else
     dispatch_async(dispatch_get_main_queue(), ^{
-        QEMUScreen screen = [cocoaView gscreen];
-        float contentsScale = [cocoaView currentContentsScale];
-        // Mark old cursor rect as dirty
-        CGRect rect = [cocoaView cursorRect];
-        [cocoaView setNeedsDisplayInRect:rect];
-        // Update rect for cursor sprite
-        rect.origin = CGPointMake(x / contentsScale, (screen.height - y) / contentsScale - rect.size.height);
-        [cocoaView setCursorRect:rect];
-        [cocoaView setCursorVisible:visible ? YES : NO];
-        // Mark new cursor rect as dirty
-        [cocoaView setNeedsDisplayInRect:rect];
+        [cocoaView setMouseX:x y:y on:on];
     });
-    [pool release];
 #endif // COCOA_METAL_VIEW
 }
 
