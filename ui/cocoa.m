@@ -334,19 +334,6 @@ static void handleAnyDeviceErrors(Error * err)
     NSDate *recordingStart;
     CVPixelBufferRef compressionInBuffer;
     CFMachPortRef eventsTap;
-    CGRect cursorRect;
-    CGImageRef cursorImage;
-    BOOL cursorVisible;
-    float currentContentsScale;
-    BOOL isHostResizing;
-    BOOL windowIsMoving;
-    AVAssetWriter *recorder;
-    AVAssetWriterInput *recorderInput;
-    AVAssetWriterInputPixelBufferAdaptor *recorderInputAdaptor;
-    CGSize recordingSize;
-    BOOL isRecording;
-    NSDate *recordingStart;
-    CVPixelBufferRef compressionInBuffer;
 }
 - (void) switchSurface:(pixman_image_t *)image;
 - (void) grabMouse;
@@ -1273,7 +1260,6 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
         [[self window] setTitle:@"QEMU - (Press  " UC_CTRL_KEY " " UC_ALT_KEY " G  to release Mouse)"];
     [self hideCursor];
     CGAssociateMouseAndMouseCursorPosition(isAbsoluteEnabled);
-    [self showTitleMomentarily];
     isMouseGrabbed = TRUE; // while isMouseGrabbed = TRUE, QemuCocoaApp sends all events to [cocoaView handleEvent:]
 }
 
@@ -1286,7 +1272,6 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     else
         [[self window] setTitle:@"QEMU"];
     [self unhideCursor];
-    [self showTitleMomentarily];
     CGAssociateMouseAndMouseCursorPosition(TRUE);
     isMouseGrabbed = FALSE;
     [self raiseAllButtons];
@@ -1645,19 +1630,6 @@ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEven
     return [self verifyQuit];
 }
 
-- (void)windowDidBecomeKey:(NSNotification *)note
-{
-    if ([note.object isEqual:normalWindow]) {
-        [cocoaView showTitleMomentarily];
-    }
-}
-
-- (void)windowDidResignKey:(NSNotification *)note
-{
-    if ([note.object isEqual:normalWindow]) {
-        [cocoaView showTitle];
-    }
-}
 - (void)windowDidChangeScreen:(NSNotification *)notification
 {
     [cocoaView updateUIInfo];
